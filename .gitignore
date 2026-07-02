@@ -4,3 +4,4 @@ shots/
 .superpowers/
 __pycache__/
 *.pyc
+*.blend1
