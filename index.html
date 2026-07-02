@@ -14,6 +14,19 @@
       rel="stylesheet"
     />
 
+    <script>
+      /* has-3d gate — must run before first paint so legacy visuals never flash.
+         Mirrors shouldUse3D() in js/koob3d-core.js (kept inline: must be sync). */
+      (function () {
+        try {
+          var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+          var c = document.createElement("canvas");
+          var gl = c.getContext("webgl2") || c.getContext("webgl");
+          if (gl && !reduced) document.documentElement.classList.add("has-3d");
+        } catch (e) {}
+      })();
+    </script>
+
     <style>
       :root {
         --koob-void: #040d08;
@@ -185,6 +198,33 @@
       section {
         position: relative;
         z-index: 2;
+      }
+
+      /* ===== 3D journey layer (html.has-3d gates everything) ===== */
+      #koob-3d {
+        display: none;
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1; /* above body bg, below every section (z-index: 2) */
+        pointer-events: none;
+        opacity: 0; /* no CSS transition — state.sceneOpacity drives inline opacity per frame */
+      }
+      html.has-3d #koob-3d {
+        display: block;
+      }
+      /* hide the faked 3D while the real one is live */
+      html.has-3d .hero-cup-container,
+      html.has-3d .bean-field,
+      html.has-3d .orbit-cup {
+        visibility: hidden;
+      }
+      /* let the canvas show through the three opaque 3D-hosting sections */
+      html.has-3d #collection,
+      html.has-3d #featured,
+      html.has-3d #features {
+        background: transparent;
       }
 
       #marquee {
@@ -3074,6 +3114,7 @@
   </head>
 
   <body>
+    <canvas id="koob-3d" aria-hidden="true"></canvas>
     <div class="cursor-aura" aria-hidden="true"></div>
     <div class="custom-cursor"></div>
 
@@ -4469,7 +4510,7 @@
         const reduce = prefersReducedMotion.matches;
 
         // Ambient pour: the espresso video loops quietly behind the headline.
-        if (video) {
+        if (video && !document.documentElement.classList.contains("has-3d")) {
           video.muted = true;
           video.loop = true;
           const pr = video.play();
@@ -4522,9 +4563,10 @@
       })();
 
       /* ============ Ambient bean field (one canvas, was 53 <img>) ============ */
-      (function beanField() {
+      function startBeanField() {
         const canvas = document.querySelector(".bean-field");
         if (!canvas) return;
+        if (document.documentElement.classList.contains("has-3d")) return;
         const ctx = canvas.getContext("2d");
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         let W = 0,
@@ -4602,7 +4644,9 @@
           }
         }
         requestAnimationFrame(frame);
-      })();
+      }
+      window.__startBeanField = startBeanField;
+      startBeanField();
 
       ScrollTrigger.create({
         trigger: "#hero",
@@ -5467,5 +5511,14 @@
         });
       }
     </script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="js/koob3d.js"></script>
   </body>
 </html>
