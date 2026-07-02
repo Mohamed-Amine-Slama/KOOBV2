@@ -5,3 +5,4 @@ shots/
 __pycache__/
 *.pyc
 *.blend1
+assets/models/src/*-raw.glb
