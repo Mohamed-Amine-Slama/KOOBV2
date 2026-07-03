@@ -82,11 +82,14 @@ export const CHOREOGRAPHY = [
   { id: "story", trigger: "#story", start: "top 85%", end: "bottom 40%",
     scrub: 1.2, to: { cupX: -1.15, cupScale: 0.55, beans: 1, roast: 0 } },
   /* The hero trio's flanks and the canvas-painted teal backdrop both belong
-     to the hero alone — they finish fading before the story copy arrives
-     (a tighter range than story's own, which keeps ghost cups from lingering
-     over the chapter text). Separate entry so story's long scrub never
-     re-writes these channels. */
-  { id: "heroLeave", trigger: "#story", start: "top bottom", end: "top 55%",
+     to the hero alone. The teal must hold at full strength for as long as
+     any sliver of #hero is on screen: the hero logo is a PNG with the same
+     teal baked in, and an early fade exposes it as a hard-edged picture
+     against the void. #story's opaque background wipes the viewport
+     bottom-up as it arrives, so fading these channels only over its last
+     approach (top 45% → top top) happens entirely behind it. Separate entry
+     so story's long scrub never re-writes these channels. */
+  { id: "heroLeave", trigger: "#story", start: "top 45%", end: "top top",
     scrub: 0.8, to: { sideCups: 0, heroBg: 0 } },
   { id: "collection", trigger: "#collection", start: "top top", end: "bottom bottom",
     scrub: 1, to: { cupX: 0, cupY: -0.1, cupScale: 1.15, cupRotY: 6.78, roast: 2, beans: 0.35 } },
