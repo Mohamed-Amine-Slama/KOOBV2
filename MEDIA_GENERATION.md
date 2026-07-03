@@ -186,3 +186,72 @@ Targets: hero video ≤ 3 MB. If you need a buttery-smooth scrub and don't mind 
 
 Replace any "placeholder present" file with a real generation and it appears instantly — no code
 changes. Run a quick `python3 -m http.server` and scroll through to confirm.
+
+---
+
+## 3D asset pipeline (the real-time journey layer)
+
+The scroll-driven 3D experience (portal entry → cup journey) is built from assets in
+`assets/models/`, authored in Blender and loaded by `js/koob3d.js`. Everything below is
+reproducible without sudo or a build step.
+
+### Source of truth
+
+- `assets/models/src/koob-scene.blend` — the authored scene: `Cup`, `Saucer`, `Liquid`
+  (origin at its base so `scale.y` fills upward), `Steam1..3` (alpha planes using
+  `src/steam.png`), plus Sketchfab-sourced `Bean`, `Portafilter`, `Glass`
+  (licenses: `assets/models/ATTRIBUTION.md`). Materials (exact names — the runtime looks
+  objects/materials up by name): `Ceramic` (baked 2048px col/rgh/nrm, images in
+  `src/ceramic_*.png`), `GoldRim`, `Espresso`, `SteamWisp`.
+- `assets/models/portal.glb` — the mirror-door entry arch (baked textures in `src/bake/`).
+- Regenerate the steam texture: `python3 tools/make_steam_texture.py`.
+
+### Export recipe (Blender → web)
+
+1. In Blender, select the six cup objects (or three props) and export GLB:
+   `use_selection=True, export_yup=True, export_apply=True` →
+   `assets/models/src/<name>-raw.glb` (raw exports are git-ignored).
+2. Mobile tier: duplicate objects with copied mesh data, drop Subsurf, add Decimate 0.25
+   (not on steam planes), temporarily rename the copies to the contract names, export,
+   then restore names and delete the copies.
+3. Compress (Draco + real KTX2):
+   ```bash
+   npx --yes @gltf-transform/cli@4 optimize assets/models/src/cup-desktop-raw.glb \
+     assets/models/cup-desktop.glb --compress draco --texture-compress ktx2 --texture-size 2048
+   # mobile tier: same with --texture-size 1024
+   ```
+   `ktx2` needs `toktx`: no sudo required — download the KTX-Software Linux x86_64
+   **tarball** from GitHub releases, extract anywhere, and put its `bin/` on PATH for the
+   command (it resolves its bundled libktx via rpath).
+4. Verify: `npx @gltf-transform/cli@4 inspect assets/models/cup-desktop.glb` — node names
+   must match the contract exactly; `Liquid` translation must keep its base pivot.
+
+### Budgets vs. actuals
+
+| Tier | Budget | Actual |
+|---|---|---|
+| Desktop (cup + props) | ≤ 5 MB | 3.63 MB |
+| Mobile (cup + props) | ≤ 1.5 MB | 1.03 MB |
+| Portal (both tiers) | — | 1.9 MB |
+
+### Runtime switches
+
+- Tier pick (`pickTier` in `js/koob3d-core.js`): viewport < 900px, `deviceMemory` ≤ 4, or
+  `maxTextureSize` < 4096 → mobile assets.
+- `html.has-3d` is the master switch, set by the sync gate in `<head>`: WebGL available,
+  no `prefers-reduced-motion`, and no `?no3d` in the URL. Without it the portal runway
+  collapses (`display: none`) and the legacy video/image site runs untouched.
+- Any load/context failure calls `downgrade()`: full teardown (ticker, listeners,
+  ScrollTriggers) then legacy restore.
+
+### Verification
+
+```bash
+npm test                                        # core data/logic contracts (node --test)
+npm run serve                                   # static server on :8123
+node tools/shot.mjs http://localhost:8123/ 0,1170,2300,3100,5300,11900   # screenshots + console-error gate
+node tools/shot.mjs http://localhost:8123/ 0,1100,2400 --mobile          # mobile tier
+```
+
+Lighthouse note: headless software-GL (WSL2) makes 3D-page LCP/TBT meaningless — CLS ≈ 0
+is the environment-independent gate (passes). Re-measure LCP on real GPU hardware.
