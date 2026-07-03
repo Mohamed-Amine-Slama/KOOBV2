@@ -197,13 +197,25 @@ reproducible without sudo or a build step.
 
 ### Source of truth
 
-- `assets/models/src/koob-scene.blend` — the authored scene: `Cup`, `Saucer`, `Liquid`
-  (origin at its base so `scale.y` fills upward), `Steam1..3` (alpha planes using
-  `src/steam.png`), plus Sketchfab-sourced `Bean`, `Portafilter`, `Glass`
-  (licenses: `assets/models/ATTRIBUTION.md`). Materials (exact names — the runtime looks
-  objects/materials up by name): `Ceramic` (baked 2048px col/rgh/nrm, images in
-  `src/ceramic_*.png`), `GoldRim`, `Espresso`, `SteamWisp`.
+- `assets/models/src/koob-scene.blend` — the authored scene: the branded paper cup
+  `Cup` (192-seg spin, cylindrical UVs: u = angle with the seam at the back, v =
+  height/0.1035), its separate `Lid` (black dome, origin at the cup-rim contact plane so
+  the lid-off scrub pivots naturally), `Liquid` (origin at its base so `scale.y` fills
+  upward; the runtime also scales x/z with the fill so the cone stays inside the wall
+  taper), `Steam1..3` (alpha planes using `src/steam.png`), plus Sketchfab-sourced
+  `Bean`, `Portafilter`, `Glass` (licenses: `assets/models/ATTRIBUTION.md`; the Glass is
+  retired from the choreography but still ships in the props GLB). Materials (exact
+  names — the runtime looks objects/materials up by name): `Paper` (albedo
+  `src/paper_col.png`), `LidPlastic`, `Espresso`, `SteamWisp`. There is **no `Saucer`**
+  — the cup GLB contract is `Cup, Lid, Liquid, Steam1, Steam2, Steam3`.
+- The paper albedo is authored by `python3 tools/make_cup_texture.py` (kraft base + the
+  dark KOOB sticker; `--u/--v/--radius/--aspect/--size` tunable — `--aspect` pre-squashes
+  the sticker so the cylindrical wrap reads circular; keep the grain amplitude tiny or
+  ETC1S turns it into chroma streaks). To re-texture without a Blender roundtrip,
+  `node tools/swap_cup_texture.mjs` swaps the PNG inside the raw GLBs.
 - `assets/models/portal.glb` — the mirror-door entry arch (baked textures in `src/bake/`).
+  Compressed in place (see budgets below); the pre-compression original is kept at
+  `assets/models/src/portal-original.glb` (also recoverable from git history at `0b62042`).
 - Regenerate the steam texture: `python3 tools/make_steam_texture.py`.
 
 ### Export recipe (Blender → web)
@@ -214,15 +226,23 @@ reproducible without sudo or a build step.
 2. Mobile tier: duplicate objects with copied mesh data, drop Subsurf, add Decimate 0.25
    (not on steam planes), temporarily rename the copies to the contract names, export,
    then restore names and delete the copies.
-3. Compress (Draco + real KTX2):
+3. Compress (Draco + real KTX2). Pass `--flatten false --join false --instance false
+   --simplify false --palette false` — optimize's default join pass merges the
+   `Steam1..3` nodes and breaks the name contract:
    ```bash
    npx --yes @gltf-transform/cli@4 optimize assets/models/src/cup-desktop-raw.glb \
-     assets/models/cup-desktop.glb --compress draco --texture-compress ktx2 --texture-size 2048
+     assets/models/cup-desktop.glb --compress draco --texture-compress ktx2 --texture-size 2048 \
+     --flatten false --join false --instance false --simplify false --palette false
    # mobile tier: same with --texture-size 1024
    ```
+   Desktop cup albedo ships as **UASTC** for sharper sticker strokes (ETC1S softens
+   them): run `optimize` with `--texture-compress false`, then
+   `npx @gltf-transform/cli@4 uastc in.glb out.glb --slots baseColor --level 2 --zstd 18`,
+   then re-apply `npx @gltf-transform/cli@4 draco` (the uastc pass drops it).
    `ktx2` needs `toktx`: no sudo required — download the KTX-Software Linux x86_64
    **tarball** from GitHub releases, extract anywhere, and put its `bin/` on PATH for the
-   command (it resolves its bundled libktx via rpath).
+   command (it resolves its bundled libktx via rpath). This checkout has it at
+   `~/.local/ktx/KTX-Software-4.4.2-Linux-x86_64/bin`.
 4. Verify: `npx @gltf-transform/cli@4 inspect assets/models/cup-desktop.glb` — node names
    must match the contract exactly; `Liquid` translation must keep its base pivot.
 
@@ -230,17 +250,25 @@ reproducible without sudo or a build step.
 
 | Tier | Budget | Actual |
 |---|---|---|
-| Desktop (cup + props) | ≤ 5 MB | 3.63 MB |
-| Mobile (cup + props) | ≤ 1.5 MB | 1.03 MB |
-| Portal (both tiers) | — | 1.9 MB |
+| Desktop (cup + props) | ≤ 5 MB | 3.5 MB (paper cup 225 KB UASTC + props 3.3 MB) |
+| Mobile (cup + props) | ≤ 1.5 MB | 1.0 MB (paper cup 62 KB) |
+| Portal (both tiers) | — | 0.58 MB (compressed in place from 1.9 MB via the same recipe below — draco + KTX2 @2048px; original kept at `assets/models/src/portal-original.glb`) |
 
 ### Runtime switches
 
 - Tier pick (`pickTier` in `js/koob3d-core.js`): viewport < 900px, `deviceMemory` ≤ 4, or
   `maxTextureSize` < 4096 → mobile assets.
 - `html.has-3d` is the master switch, set by the sync gate in `<head>`: WebGL available,
-  no `prefers-reduced-motion`, and no `?no3d` in the URL. Without it the portal runway
-  collapses (`display: none`) and the legacy video/image site runs untouched.
+  no `prefers-reduced-motion`, and no `?no3d` in the URL. Without it the portal overlay
+  never shows and the legacy video/image site runs untouched.
+- The portal entry is a **time-based overlay flight on top of #hero** (no scroll runway;
+  `#hero` sits at scroll 0). The flight tween is created paused and played only once the
+  GLBs are adopted and shaders compiled — never on a wall-clock delay, because Lenis's
+  `lagSmoothing(0)` turns load stalls into tween-skipping time jumps. Scrolling stays
+  Lenis-locked (`window.__lenis` handshake with index.html) until the flight lands.
+- Under `has-3d` the canvas paints the brand-teal hero backdrop itself (`HERO_BG_COLOR`
+  clear color, gated by `portalT`, faded out by the `heroLeave` entry); the `#hero` DOM
+  is transparent, and the teal CSS background serves the no-3d fallback.
 - Any load/context failure calls `downgrade()`: full teardown (ticker, listeners,
   ScrollTriggers) then legacy restore.
 

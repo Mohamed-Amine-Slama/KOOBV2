@@ -6,12 +6,15 @@
 | Portafilter | Portafilter | denisdaxton | CC Attribution (CC-BY 4.0) | https://sketchfab.com/3d-models/portafilter-9722f769b44d4bc0b8f65582b09d3da6 |
 | Glass | Tall Glass | DavideFon | CC Attribution (CC-BY 4.0) | https://sketchfab.com/3d-models/tall-glass-f978e6f36d5040a89053029bbad94b62 |
 
-Cup, Saucer, Liquid, Steam: original work, created in Blender for KOOB.
+Cup, Lid, Liquid, Steam: original work, created in Blender for KOOB (branded paper cup
+with a separate black lid; the sticker artwork is the KOOB brand logo). The earlier
+ceramic Cup + Saucer are retired but recoverable from git history. The Glass is no
+longer shown by the scroll choreography but still ships in the props GLB.
 
 ## Notes on modification (derivative works, per CC-BY terms)
 
 - **Bean**: kept the model's original PBR albedo/roughness/normal texture set (reads as a
-  quality roasted bean, ~#63524 6 average tone — same family as the brand's roast palette);
+  quality roasted bean, ~#635246 average tone — same family as the brand's roast palette);
   consolidated import hierarchy into a single object, scaled to ~12mm, origin set to bounds
   center.
 - **Portafilter**: re-materialed. Replaced the model's original texture-based material with

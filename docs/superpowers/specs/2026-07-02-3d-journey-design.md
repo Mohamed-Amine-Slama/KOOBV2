@@ -106,7 +106,8 @@ these hold:
 
 Device capability check (GPU tier / memory / viewport) picks the desktop vs mobile asset
 tier. Assets lazy-load behind the existing ~3s preloader animation so perceived load time
-does not change. The fallback decision is made once at boot; no mid-session swapping.
+does not change. The fallback decision is made at boot; additionally, mid-session failures
+(WebGL context loss, GLB load failure) trigger a one-way downgrade to the legacy experience.
 
 ## Verification
 

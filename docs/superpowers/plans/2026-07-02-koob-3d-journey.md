@@ -21,6 +21,7 @@
 - Sketchfab: downloadable CC0/CC-BY models only; every import recorded in `assets/models/ATTRIBUTION.md`; CC-BY additionally gets a visible footer credit.
 - Commits: one per task minimum, message style `feat(3d): ...`, each ending with the line `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
 - Execute in-place on `main` (Blender exports write directly into `assets/models/`; a worktree would break Blender's export paths).
+- Amendment (final review): portal.glb (user feature, both tiers) adds 0.58 MB outside the original cup+props budgets — compressed with the standard recipe; accepted as a recorded exception.
 
 ## File Structure
 
