@@ -92,8 +92,10 @@ export const CHOREOGRAPHY = [
     scrub: 1, to: { cupX: 0, cupY: -0.1, cupScale: 1.15, cupRotY: 6.78, roast: 2, beans: 0.35 } },
   { id: "menu", trigger: "#menu", start: "top 70%", end: "top 15%",
     scrub: 1, to: { sceneOpacity: 0, cupScale: 0.5, steam: 0, beans: 0 } },
-  { id: "featured", trigger: "#featured", start: "top 60%", end: "bottom bottom",
-    scrub: 1, to: { sceneOpacity: 1 } },
+  /* No entry for #featured: the glass prop that used to fade in there is
+     retired, and the scene stays dark (menu's sceneOpacity 0 holds) until
+     the cup returns for #features below — restoring opacity over #featured
+     just floated the parked cup over the drink cards. */
   /* cup parks in the standard-panel's clear bottom-right corner (below the
      chapter copy, right of the ticks) — dead center put it straight over the
      chapter titles, which the section's pinned crossfade keeps at screen

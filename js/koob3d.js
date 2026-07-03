@@ -288,6 +288,14 @@ function boot() {
   let portalParts = null; // set when portal.glb streams in (see Promise.all below)
   rig.add(cupParts.group);
 
+  // Mobile composition: the choreography's x offsets and the 1.3 hero scale
+  // were framed for a landscape frustum (half-width ≈ 0.28 at z=0); a 390px
+  // portrait frame is only ≈ 0.08 wide there, which threw the trio almost
+  // entirely off-frame. Pull every x toward centre and shrink the cups so
+  // the same choreography reads on both.
+  const comFX = tier === "mobile" ? 0.3 : 1;
+  const comFS = tier === "mobile" ? 0.78 : 1;
+
   // hero trio: two static lidded clones stacked behind the journey cup
   // (middle front, flanks tucked behind its shoulders — the product-lineup
   // composition). Parented to the scene (not the rig) so choreography/
@@ -296,8 +304,8 @@ function boot() {
   // by the 1.3 hero cupScale, and the same 1.3 scale so all three read as
   // the same physical cup.
   const sideCupsGroup = new THREE.Group();
-  sideCupsGroup.position.set(0.194, -0.131, 0);
-  sideCupsGroup.scale.setScalar(1.3);
+  sideCupsGroup.position.set(0.194 * comFX, -0.131, 0);
+  sideCupsGroup.scale.setScalar(1.3 * comFS);
   scene.add(sideCupsGroup);
   let sideCupParts = buildSideCups(cupParts);
   sideCupsGroup.add(sideCupParts.group);
@@ -430,9 +438,9 @@ function boot() {
   const roastColorB = new THREE.Color();
   function applyState() {
     applyPortalState();
-    rig.position.set(state.cupX * 0.22, state.cupY * 0.22 + parallax.y, state.cupZ);
+    rig.position.set(state.cupX * 0.22 * comFX, state.cupY * 0.22 + parallax.y, state.cupZ);
     rig.rotation.set(state.cupRotX, state.cupRotY + parallax.x, 0);
-    rig.scale.setScalar(state.cupScale);
+    rig.scale.setScalar(state.cupScale * comFS);
     // liquid fills bottom-up: origin sits at the liquid's base. The authored
     // cone matches the cup's interior taper at FULL height — squashing only
     // scale.y would leave its wide top rim poking through the narrower wall
@@ -486,6 +494,14 @@ function boot() {
   /* ---- render-on-demand: gsap.ticker is already running for Lenis ---- */
   function tick() {
     if (!needsRender || state.sceneOpacity <= 0.001) {
+      // Keep the DOM opacity in sync even when skipping the render: an
+      // instant scroll jump (anchor click, test harness) can drop
+      // sceneOpacity from 1 to 0 between two ticks, and bailing before
+      // applyState() would freeze the canvas at its last-painted opacity —
+      // a stale hero frame left showing through the transparent sections.
+      if (state.sceneOpacity <= 0.001) {
+        canvas.style.setProperty("opacity", "0");
+      }
       lastActiveFrameTime = null; // break the frame-time window across idle gaps
       armHardPause();
       return;
