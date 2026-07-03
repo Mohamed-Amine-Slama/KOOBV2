@@ -224,22 +224,20 @@
         display: block;
       }
 
-      /* ===== portal entry (3D only): #portal-entry is a pure scroll runway
-         at the top of the page; all visuals live on these fixed layers plus
-         the canvas. koob3d.js scrubs state.portalT over the runway, flying
-         the camera through the portal GLB — the .portal-active class (added
-         at boot, removed once through the arch at portalT ≥ 0.97) raises the
-         canvas above the veil for the duration of the fly-through. Legacy /
-         reduced-motion visitors never see any of this: everything here is
-         display-gated on html.has-3d. ===== */
-      #portal-entry,
+      /* ===== portal entry (3D only): a time-based overlay flight that plays
+         on top of the hero as the preloader clears — #hero itself sits at the
+         very top of the page, no runway section above it. All visuals live on
+         these fixed layers plus the canvas. koob3d.js tweens state.portalT
+         0→1 (see the portalEntry CHOREOGRAPHY entry), flying the camera
+         through the portal GLB — the .portal-active class (added at boot,
+         removed once through the arch at portalT ≥ 0.97) raises the canvas
+         above the veil for the duration of the fly-through, and scrolling
+         stays Lenis-locked until the flight lands. Legacy / reduced-motion
+         visitors never see any of this: everything here is display-gated on
+         html.has-3d. ===== */
       #portal-veil,
       #portal-flash {
         display: none;
-      }
-      html.has-3d #portal-entry {
-        display: block;
-        height: 260vh;
       }
       /* the dark void around the portal while approaching: above the page
          sections (z 2), below the raised canvas (z 10), so only the portal
@@ -306,7 +304,11 @@
       html.has-3d .orbit-cup {
         visibility: hidden;
       }
-      /* let the canvas show through the three opaque 3D-hosting sections */
+      /* let the canvas show through the opaque 3D-hosting sections — #hero's
+         brand-teal backdrop is painted by the canvas itself under has-3d
+         (see HERO_BG_COLOR in koob3d.js) so the cup trio renders in front
+         of it; the CSS background below stays for the no-3d fallback */
+      html.has-3d #hero,
       html.has-3d #collection,
       html.has-3d #featured,
       html.has-3d #features {
@@ -3174,7 +3176,7 @@
     <canvas id="koob-3d" aria-hidden="true"></canvas>
     <!-- portal-entry fixed layers (3D only — see the portal CSS block) -->
     <div id="portal-veil" aria-hidden="true">
-      <div class="portal-hint">Scroll to step inside</div>
+      <div class="portal-hint">Stepping inside</div>
     </div>
     <div id="portal-flash" aria-hidden="true"></div>
     <div class="cursor-aura" aria-hidden="true"></div>
@@ -3296,11 +3298,6 @@
           <div class="preloader-slat"></div>
         </div>
       </div>
-
-      <!-- portal entry: 3D-only scroll runway; koob3d.js flies the camera
-           through the portal GLB over these 260vh (collapses to nothing
-           without html.has-3d) -->
-      <section id="portal-entry" aria-hidden="true"></section>
 
       <section id="hero">
         <div class="god-rays" aria-hidden="true"></div>
@@ -4301,6 +4298,12 @@
         });
 
         gsap.ticker.lagSmoothing(0);
+
+        // koob3d.js owns the scroll lock during the portal overlay flight:
+        // under has-3d the intro timeline leaves Lenis stopped and the
+        // flight's onComplete (or its downgrade/reload-skip paths) restarts
+        // it through this handle.
+        window.__lenis = lenis;
       }
 
       const cursor = document.querySelector(".custom-cursor");
@@ -4500,7 +4503,13 @@
               opacity: 1,
               duration: 0.5,
               onComplete: () => {
-                if (lenis) lenis.start();
+                // Under has-3d the portal overlay flight is still playing
+                // when this timeline ends — koob3d.js restarts Lenis when
+                // the flight lands (window.__lenis). Restart here only for
+                // the legacy path, where there is no flight to wait on.
+                if (lenis && !document.documentElement.classList.contains("has-3d")) {
+                  lenis.start();
+                }
                 ScrollTrigger.refresh();
               },
             },
@@ -5608,12 +5617,13 @@
          this fallback can't rely on anything it would otherwise set up
          (window.__koob3d, its own downgrade()); it has to be self-contained
          DOM cleanup so a CDN outage doesn't strand the page with has-3d set
-         (dead 260vh portal runway, hidden hero cup, no bean field). -->
+         (stuck portal veil, hidden hero cup, no bean field, stopped Lenis). -->
     <script type="module" src="js/koob3d.js" onerror="
       document.documentElement.classList.remove('has-3d','portal-active');
       var c=document.getElementById('koob-3d'); if(c) c.remove();
       var v=document.querySelector('.hero-fill-video'); if(v){v.muted=true;v.loop=true;var p=v.play(); if(p&&p.catch)p.catch(function(){});}
       if(window.__startBeanField) window.__startBeanField();
+      if(window.__lenis) window.__lenis.start();
       if(window.ScrollTrigger) window.ScrollTrigger.refresh();
     "></script>
   </body>

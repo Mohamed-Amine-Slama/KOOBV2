@@ -20,18 +20,22 @@ const root = document.documentElement;
 const GOLD_BURST_COUNT = 60;
 const GOLD_BURST_COLOR = 0xc8a96e; // KOOB palette gold
 
-/* Portal entry constants. The camera dollies from FAR_Z to NEAR_Z as
-   state.portalT scrubs 0→1 through #portal-entry; the portal arch plane sits
-   at PORTAL_Z between them, so the camera physically crosses it (at
-   portalT ≈ 0.9 given the dolly's pow-1.35 easing). NEAR_Z is the cup
-   journey's long-standing fixed camera position — the fly-through lands
-   exactly where every later choreography frame expects the camera to be. */
+/* Portal entry constants. The camera dollies from FAR_Z to NEAR_Z as the
+   time-based portalEntry tween plays state.portalT 0→1 over the hero; the
+   portal arch plane sits at PORTAL_Z between them, so the camera physically
+   crosses it (at portalT ≈ 0.9 given the dolly's pow-1.35 easing). NEAR_Z is
+   the cup journey's long-standing fixed camera position — the fly-through
+   lands exactly where every later choreography frame expects the camera. */
 const PORTAL_CAM_FAR_Z = 3.4;
 const PORTAL_CAM_NEAR_Z = 0.55;
 const PORTAL_Z = 0.85;
 const PORTAL_SCALE = 0.3; // GLB is authored at real size (2.57m tall)
 // arch centerline is 1.3m up in the GLB; place it dead ahead of the camera
 const PORTAL_Y = 0.22 - 1.3 * PORTAL_SCALE;
+// Brand-teal the canvas clears to behind the hero trio (#hero DOM is
+// transparent under has-3d); matches the no-3d hero's CSS background so the
+// fallback and the 3D hero read as the same design.
+const HERO_BG_COLOR = new THREE.Color(0x275c59);
 
 // Set by boot() once its per-instance teardown() closure exists; downgrade()
 // calls through this so the render loop, listeners, and every scroll-driven
@@ -63,11 +67,14 @@ function downgrade(reason) {
   if (currentTeardown) currentTeardown();
   root.classList.remove("has-3d");
   root.classList.remove("portal-active");
+  // a downgrade mid-flight leaves Lenis stopped (the flight's onComplete
+  // never fires once its tween is killed) — hand scrolling back here
+  if (window.__lenis) window.__lenis.start();
   const canvas = document.getElementById("koob-3d");
   if (canvas) canvas.remove();
-  // removing has-3d collapses #portal-entry (display:none → its 260vh of
-  // document height is gone), so every ScrollTrigger built against the old
-  // layout — including the DOM-only ones created in index.html — is stale
+  // removing has-3d restores the sections' opaque backgrounds, so every
+  // ScrollTrigger built against the 3D layout — including the DOM-only ones
+  // created in index.html — is stale
   if (window.ScrollTrigger) window.ScrollTrigger.refresh();
   const video = document.querySelector(".hero-fill-video");
   if (video) {
@@ -179,23 +186,30 @@ function boot() {
   const portalHint = portalVeil ? portalVeil.querySelector(".portal-hint") : null;
 
   /* ---- reload-mid-page guard: browsers restore scrollY *before* this module
-     runs, so a reader who hits F5 deep in the page (past the portal runway)
-     lands here with scroll already at, say, the quiz section. The scrub
-     tweens created below resolve correctly against that scrollY the instant
-     their ScrollTriggers are created (sceneOpacity 0, portalT 1) — but two
-     things elsewhere in boot() assume a top-of-page load and must be held
-     back instead: portal-active here (would raise the veil/flash layers for
-     the one frame before the first tick corrects it) and the time-based
-     "boot" CHOREOGRAPHY tween further down (which fades state.sceneOpacity
-     to 1 on a fixed 3.2s timer regardless of scroll — a ghost cup fading in
-     over whatever section the reader actually landed on). Both are skipped
-     when pastPortal is true; a normal top-of-page load (pastPortal false) is
-     unaffected. */
-  const portalRunway = document.getElementById("portal-entry");
-  const pastPortal =
-    (window.scrollY || document.documentElement.scrollTop) >
-    (portalRunway ? portalRunway.offsetHeight : innerHeight) - innerHeight;
+     runs, so a reader who hits F5 deep in the page lands here with scroll
+     already at, say, the quiz section. The scrub tweens created below resolve
+     correctly against that scrollY the instant their ScrollTriggers are
+     created — but the time-based CHOREOGRAPHY tweens (the sceneOpacity boot
+     fade and the portal overlay flight) assume a top-of-page load and must be
+     held back instead: replaying the flight would veil the section the reader
+     actually landed on, and the fixed-timer fade would ghost a cup in over
+     it. When pastPortal is true both are skipped, portalT snaps to its
+     landed state, and the scroll lock is released immediately. */
+  const pastPortal = (window.scrollY || document.documentElement.scrollTop) > 4;
   if (!pastPortal) root.classList.add("portal-active");
+
+  // Lenis is exposed as window.__lenis by index.html; under has-3d the intro
+  // timeline leaves it stopped so the page can't scroll out from under the
+  // time-based portal flight. Every path out of the flight (landing,
+  // reload-skip, downgrade mid-flight) must release it — start() is
+  // idempotent, so overlapping calls in an odd teardown ordering are harmless.
+  function releaseScroll() {
+    if (window.__lenis) window.__lenis.start();
+  }
+  if (pastPortal) {
+    state.portalT = 1;
+    releaseScroll();
+  }
 
   /* ---- render-loop discipline: hard pause, tab-visibility suspend, and an
      adaptive DPR drop all hang off the same `tick` function, so they're
@@ -268,12 +282,16 @@ function boot() {
   let portalParts = null; // set when portal.glb streams in (see Promise.all below)
   rig.add(cupParts.group);
 
-  // hero trio: two static lidded clones flanking the journey cup. Parented to
-  // the scene (not the rig) so choreography/parallax only move the middle cup;
-  // position mirrors the rig's hero framing (cupX 1.1, cupY -0.2)·0.22 plus
-  // the cup group's own -0.06.
+  // hero trio: two static lidded clones stacked behind the journey cup
+  // (middle front, flanks tucked behind its shoulders — the product-lineup
+  // composition). Parented to the scene (not the rig) so choreography/
+  // parallax only move the middle cup; transform mirrors the rig's hero
+  // framing: (cupX 0.88, cupY -0.24)·0.22, the cup group's own -0.06 scaled
+  // by the 1.3 hero cupScale, and the same 1.3 scale so all three read as
+  // the same physical cup.
   const sideCupsGroup = new THREE.Group();
-  sideCupsGroup.position.set(0.242, -0.104, 0);
+  sideCupsGroup.position.set(0.194, -0.131, 0);
+  sideCupsGroup.scale.setScalar(1.3);
   scene.add(sideCupsGroup);
   let sideCupParts = buildSideCups(cupParts);
   sideCupsGroup.add(sideCupParts.group);
@@ -284,6 +302,12 @@ function boot() {
   rig.add(goldBurst.points);
 
   window.__koob3d = { state, scene, renderer, tier, goldBurst, frames: 0 };
+
+  // The portal flight tween (created paused in the CHOREOGRAPHY loop below)
+  // and the boot timestamp its start is measured against: the flight plays
+  // once assets are adopted AND the preloader has had time to clear.
+  let portalFlight = null;
+  const bootAt = performance.now();
 
   const urls = modelUrls(tier);
   const draco = new DRACOLoader().setDecoderPath(
@@ -335,6 +359,20 @@ function boot() {
       goldBurst.rimRadius = ((rimBox.max.x - rimBox.min.x) / 2) * 0.85;
 
       invalidate();
+
+      // Play the portal flight now that the real assets are in the scene.
+      // compile() pushes every shader through the GPU first — the initial
+      // program compile is the biggest main-thread stall left, and with
+      // lagSmoothing(0) (Lenis needs it) a stall mid-flight would advance
+      // the tween by the whole stall at once. The delayedCall holds the
+      // start until the preloader's venetian slats have cleared (~2.3s from
+      // boot) on fast loads; on slow loads the assets themselves were the
+      // wait and the flight starts immediately.
+      renderer.compile(scene, camera);
+      const holdMs = Math.max(0, 2300 - (performance.now() - bootAt));
+      tweens.push(window.gsap.delayedCall(holdMs / 1000, () => {
+        if (!dead && portalFlight) portalFlight.play();
+      }));
     })
     .catch((err) => downgrade(err));
 
@@ -389,8 +427,12 @@ function boot() {
     rig.position.set(state.cupX * 0.22, state.cupY * 0.22 + parallax.y, state.cupZ);
     rig.rotation.set(state.cupRotX, state.cupRotY + parallax.x, 0);
     rig.scale.setScalar(state.cupScale);
-    // liquid fills bottom-up: origin sits at the liquid's base
-    cupParts.liquid.scale.y = Math.max(state.liquidFill, 0.001);
+    // liquid fills bottom-up: origin sits at the liquid's base. The authored
+    // cone matches the cup's interior taper at FULL height — squashing only
+    // scale.y would leave its wide top rim poking through the narrower wall
+    // lower down, so x/z track the wall taper as the fill rises.
+    const fill = Math.max(state.liquidFill, 0.001);
+    cupParts.liquid.scale.set(0.68 + 0.32 * fill, fill, 0.68 + 0.32 * fill);
     const i = Math.min(Math.floor(state.roast), ROASTS.length - 2);
     const f = Math.min(state.roast - i, 1);
     roastColorA.set(ROASTS[i].body);
@@ -414,6 +456,14 @@ function boot() {
     for (const m of sideCupParts.materials) m.opacity = sc;
     sideCupParts.group.position.z = -(1 - sc) * 0.3;
     sideCupParts.group.visible = sc > 0.01;
+    // Brand-teal backdrop painted by the canvas itself: the #hero DOM is
+    // transparent under has-3d so the trio renders in front of the teal, and
+    // the portalT gate keeps the flight in the dark void — the wash arrives
+    // only as the camera pierces the arch, then heroLeave scrubs it back out.
+    renderer.setClearColor(
+      HERO_BG_COLOR,
+      state.heroBg * smooth01((state.portalT - 0.85) / 0.15)
+    );
     if (propParts) {
       propParts.beans.visible = state.beans > 0.01;
       // Glass is a MeshPhysicalMaterial with transmission — fading it via
@@ -503,16 +553,29 @@ function boot() {
     if (c.trigger === null) {
       // Skip on a reload-mid-page landing (see the pastPortal guard above):
       // the scrub tweens below already own sceneOpacity for wherever the
-      // reader actually is, and this fixed-timer fade has no idea where that
-      // is — letting it run would fade a ghost cup in over that section.
+      // reader actually is, and these fixed-timer tweens (boot fade, portal
+      // flight) have no idea where that is — letting them run would fade a
+      // ghost cup in, or replay the veiled flight, over that section.
       if (pastPortal) continue;
-      tweens.push(window.gsap.to(state, {
+      // The flight is created PAUSED and played from the asset .then above,
+      // never on a delay: gsap.ticker runs with lagSmoothing(0) (Lenis
+      // needs it), so a load-time main-thread stall (CDN fetch, GLB decode,
+      // first shader compile) would otherwise advance a delayed tween by
+      // the whole stall at once and skip the flight entirely.
+      const isFlight = c.id === "portalEntry";
+      const tw = window.gsap.to(state, {
         ...c.to,
         duration: c.duration,
-        delay: 3.2, // after the preloader venetian split
-        ease: "power2.out",
+        delay: isFlight ? 0 : (c.delay ?? 3.2),
+        ease: c.ease || "power2.out",
+        paused: isFlight,
         onUpdate: invalidate,
-      }));
+        // the flight owns the scroll lock on a normal load; landing hands
+        // the page back to the reader (see releaseScroll above)
+        onComplete: isFlight ? releaseScroll : undefined,
+      });
+      if (isFlight) portalFlight = tw;
+      tweens.push(tw);
     } else {
       // Scrub tweens ease toward their target over `c.scrub` seconds rather than
       // snapping instantly, so a tween can still be "catching up" for a moment
@@ -729,8 +792,11 @@ function buildSideCups(cupParts) {
     c.scale.setScalar(scale);
     group.add(c);
   };
-  makeClone(-0.115, -0.10, 0.55, 0.92); // left flank, angled toward center
-  makeClone(0.10, -0.14, -0.7, 0.88);   // right flank, further back
+  // stacked lineup: flanks tucked close behind the middle cup's shoulders so
+  // the silhouettes overlap (reference: three-cup product shot), logos angled
+  // just enough to stay readable without mirroring the front cup exactly
+  makeClone(-0.058, -0.075, 0.42, 1.0); // left-back shoulder
+  makeClone(0.058, -0.095, -0.48, 1.0); // right-back, a touch deeper
   return { group, materials };
 }
 

@@ -47,10 +47,10 @@ test("modelUrls: builds tiered paths and rejects junk", () => {
 const STATE_KEYS = [
   "cupX", "cupY", "cupZ", "cupRotX", "cupRotY", "cupScale",
   "liquidFill", "steam", "roast", "beans", "glass", "sceneOpacity",
-  "portalT", "lidLift", "sideCups",
+  "portalT", "lidLift", "sideCups", "heroBg",
 ];
 const SECTION_IDS = [
-  "#portal-entry", "#hero", "#story", "#collection", "#menu",
+  "#hero", "#story", "#collection", "#menu",
   "#featured", "#features", "#quiz",
 ];
 
@@ -77,7 +77,7 @@ test("CHOREOGRAPHY: unique ids, real section triggers, known keys", () => {
 
 test("CHOREOGRAPHY: normalized channels stay in [0,1], roast in range", () => {
   for (const c of CHOREOGRAPHY) {
-    for (const k of ["liquidFill", "steam", "beans", "glass", "sceneOpacity", "portalT", "lidLift", "sideCups"]) {
+    for (const k of ["liquidFill", "steam", "beans", "glass", "sceneOpacity", "portalT", "lidLift", "sideCups", "heroBg"]) {
       if (k in c.to) assert.ok(c.to[k] >= 0 && c.to[k] <= 1, `${c.id}.${k}`);
     }
     if ("roast" in c.to) {
@@ -122,7 +122,29 @@ test("hero: lid lifts first, fill takes over at the same scroll point", () => {
   assert.equal(fill.to.steam, 1);
 });
 
-test("story fades the hero side cups out", () => {
-  const story = CHOREOGRAPHY.find((c) => c.id === "story");
-  assert.equal(story.to.sideCups, 0);
+test("heroLeave fades the side cups and teal backdrop before story copy", () => {
+  const leave = CHOREOGRAPHY.find((c) => c.id === "heroLeave");
+  assert.ok(leave);
+  assert.equal(leave.to.sideCups, 0);
+  assert.equal(leave.to.heroBg, 0);
+  // single-writer: no other entry touches these hero-only channels
+  for (const c of CHOREOGRAPHY) {
+    if (c.id === "heroLeave") continue;
+    assert.ok(!("sideCups" in c.to), `${c.id} writes sideCups`);
+    assert.ok(!("heroBg" in c.to), `${c.id} writes heroBg`);
+  }
+});
+
+test("portal entry is a time-based overlay flight, not scroll-driven", () => {
+  const portal = CHOREOGRAPHY.find((c) => c.id === "portalEntry");
+  assert.ok(portal);
+  assert.equal(portal.trigger, null);
+  assert.equal(typeof portal.duration, "number");
+  assert.equal(portal.to.portalT, 1);
+});
+
+test("the glass prop is retired: no entry ever shows it", () => {
+  for (const c of CHOREOGRAPHY) {
+    assert.ok(!(c.to.glass > 0), `${c.id} raises glass`);
+  }
 });
