@@ -7,6 +7,7 @@
   },
   "scripts": {
     "test": "node --test tools/test/*.test.mjs",
-    "serve": "python3 -m http.server 8123"
+    "start": "node tools/serve.mjs",
+    "serve": "node tools/serve.mjs"
   }
 }

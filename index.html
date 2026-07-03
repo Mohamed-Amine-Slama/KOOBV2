@@ -24,6 +24,14 @@
           var gl = c.getContext("webgl2") || c.getContext("webgl");
           if (gl && !reduced && !/[?&]no3d/.test(location.search))
             document.documentElement.classList.add("has-3d");
+          // This probe context is thrown away immediately (koob3d.js opens
+          // its own on the real canvas); release its GPU-side resources
+          // right away instead of waiting on GC, same idea as calling
+          // dispose() on anything else backed by native memory.
+          if (gl && gl.getExtension) {
+            var lc = gl.getExtension("WEBGL_lose_context");
+            if (lc) lc.loseContext();
+          }
         } catch (e) {}
       })();
     </script>
@@ -760,17 +768,6 @@
             rgba(8, 37, 24, 0.8)
           ),
           url("assets/beans-macro.webp");
-        background-size: cover;
-        background-position: center;
-      }
-
-      .card-bg-3 {
-        background: linear-gradient(
-            150deg,
-            rgba(8, 37, 24, 0.5),
-            rgba(8, 37, 24, 0.78)
-          ),
-          url("assets/amb-mirror.webp");
         background-size: cover;
         background-position: center;
       }
@@ -1875,6 +1872,7 @@
       #hero {
         min-height: 100vh;
         width: 100%;
+        background-color: #275c59;
         display: flex;
         align-items: flex-start;
         justify-content: flex-start;
@@ -2161,41 +2159,14 @@
       }
 
       .hero-title {
-        font-family: var(--font-hero);
-        font-style: italic;
-        font-weight: 900;
-        line-height: 0.9;
         margin-bottom: 2rem;
         transform-origin: left center;
       }
 
-      .hero-title-ghost {
-        font-size: clamp(96px, 23vw, 360px);
-        font-variation-settings: "opsz" 96, "wght" 900;
-        letter-spacing: -0.02em;
-        line-height: 0.8;
-        color: transparent;
-        -webkit-text-stroke: 1.5px rgba(245, 240, 232, 0.82);
-        text-shadow: 0 0 60px rgba(245, 240, 232, 0.06);
-      }
-
-      .hero-title-solid {
-        font-size: clamp(58px, 15vw, 230px);
-        font-variation-settings: "opsz" 96, "wght" 900;
-        letter-spacing: -0.015em;
-        line-height: 0.85;
-        margin-top: -0.14em;
-        background: linear-gradient(
-          168deg,
-          var(--koob-gold-bright) 0%,
-          var(--koob-gold) 45%,
-          #9a7c44 100%
-        );
-        -webkit-background-clip: text;
-        background-clip: text;
-        -webkit-text-fill-color: transparent;
-        color: var(--koob-gold);
-        filter: drop-shadow(0 6px 30px rgba(200, 169, 110, 0.28));
+      .hero-title-logo {
+        display: block;
+        width: clamp(300px, 38vw, 620px);
+        height: auto;
       }
 
       .hero-subtext {
@@ -2710,9 +2681,13 @@
         }
 
         .hero-title {
-          font-size: 22vw;
           text-align: center;
           margin-top: 2vh;
+        }
+
+        .hero-title-logo {
+          width: min(78vw, 420px);
+          margin: 0 auto;
         }
 
         .hero-cup-container {
@@ -3352,8 +3327,11 @@
 
         <div class="hero-content">
           <h1 class="hero-title">
-            <div class="hero-title-ghost">KOOB</div>
-            <div class="hero-title-solid">Coffee</div>
+            <img
+              class="hero-title-logo"
+              src="assets/logo%202.pdf_20260703_174119_0000.png"
+              alt="KOOB — كوب"
+            />
           </h1>
 
           <div class="hero-subtext">
@@ -4391,8 +4369,7 @@
           if (pl) pl.style.display = "none";
           gsap.set(
             [
-              ".hero-title-ghost",
-              ".hero-title-solid",
+              ".hero-title-logo",
               ".hero-cup-container",
               ".hero-subtext",
               ".cta-button",
@@ -4490,7 +4467,7 @@
           .to("#preloader", { display: "none", duration: 0 }, 4.0)
 
           .from(
-            ".hero-title-ghost",
+            ".hero-title-logo",
             {
               y: 100,
               opacity: 0,
@@ -4499,17 +4476,6 @@
               ease: "power4.out",
             },
             3.6
-          )
-          .from(
-            ".hero-title-solid",
-            {
-              y: 100,
-              opacity: 0,
-              rotationX: -80,
-              duration: 1,
-              ease: "power4.out",
-            },
-            3.8
           )
           .from(
             ".hero-cup-container",
@@ -5636,6 +5602,19 @@
         }
       }
     </script>
-    <script type="module" src="js/koob3d.js"></script>
+    <!-- Module scripts fire `error` on the element (not `window.onerror`) when
+         the module graph fails to fetch — e.g. the three.js CDN import map
+         above is unreachable. koob3d.js never gets to run in that case, so
+         this fallback can't rely on anything it would otherwise set up
+         (window.__koob3d, its own downgrade()); it has to be self-contained
+         DOM cleanup so a CDN outage doesn't strand the page with has-3d set
+         (dead 260vh portal runway, hidden hero cup, no bean field). -->
+    <script type="module" src="js/koob3d.js" onerror="
+      document.documentElement.classList.remove('has-3d','portal-active');
+      var c=document.getElementById('koob-3d'); if(c) c.remove();
+      var v=document.querySelector('.hero-fill-video'); if(v){v.muted=true;v.loop=true;var p=v.play(); if(p&&p.catch)p.catch(function(){});}
+      if(window.__startBeanField) window.__startBeanField();
+      if(window.ScrollTrigger) window.ScrollTrigger.refresh();
+    "></script>
   </body>
 </html>
