@@ -62,6 +62,8 @@ def main():
     ap.add_argument("--u", type=float, default=0.25)
     ap.add_argument("--v", type=float, default=0.52)
     ap.add_argument("--radius", type=int, default=430)
+    # map-height / circumference at sticker mid-height: 0.1035 / (2*pi*0.0355)
+    ap.add_argument("--aspect", type=float, default=0.464)
     args = ap.parse_args()
 
     logo = key_logo()
@@ -69,20 +71,30 @@ def main():
 
     base = kraft_base()
     cx, cy = int(args.u * SIZE), int((1 - args.v) * SIZE)  # v=0 is image bottom
+    rx = int(args.radius * args.aspect)
+    ry = args.radius
+    # Cylindrical UVs stretch texture-space circles by ~circumference/height;
+    # drawing an ellipse here (compressed on u) is what reads as a circle
+    # once wrapped around the cup.
     ImageDraw.Draw(base).ellipse(
-        [cx - args.radius, cy - args.radius, cx + args.radius, cy + args.radius],
+        [cx - rx, cy - ry, cx + rx, cy + ry],
         fill=STICKER,
     )
-    w = int(args.radius * 2 * 0.72)  # logo spans ~72% of the sticker
+    w = int(args.radius * 2 * 0.72)  # logo spans ~72% of the sticker (y axis basis)
     h = int(w * logo.height / logo.width)
-    lg = logo.resize((w, h), Image.LANCZOS)
-    base.paste(lg, (cx - w // 2, cy - h // 2), lg)
+    lg_w = int(w * args.aspect)  # x compressed by the same factor as the sticker
+    lg = logo.resize((lg_w, h), Image.LANCZOS)
+    base.paste(lg, (cx - lg_w // 2, cy - h // 2), lg)
     base.save(OUT)
 
     # self-checks: sticker edge is dark, far corner is still kraft
-    assert base.getpixel((cx + int(args.radius * 0.85), cy))[0] < 70
+    # logo occupies +/-0.72*rx horizontally, so 0.85*rx is clear of it
+    assert base.getpixel((cx + int(rx * 0.85), cy))[0] < 70
     assert base.getpixel((40, 40))[0] > 180
-    print(f"wrote {OUT} ({SIZE}x{SIZE}) sticker u={args.u} v={args.v} r={args.radius}")
+    print(
+        f"wrote {OUT} ({SIZE}x{SIZE}) sticker u={args.u} v={args.v} "
+        f"r={args.radius} aspect={args.aspect} (rx={rx} ry={ry})"
+    )
 
 
 if __name__ == "__main__":
