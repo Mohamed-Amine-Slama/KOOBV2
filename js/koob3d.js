@@ -5,15 +5,21 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import {
   pickTier,
   modelUrls,
   INITIAL_STATE,
   CHOREOGRAPHY,
   ROASTS,
+  WAYPOINTS,
 } from "./koob3d-core.js";
 
 const root = document.documentElement;
+
+const GOLD_BURST_COUNT = 60;
+const GOLD_BURST_COLOR = 0xc8a96e; // KOOB palette gold
+
 if (root.classList.contains("has-3d")) boot();
 
 // scratch object reused by animateBeans so the ticker never allocates
@@ -65,15 +71,39 @@ function boot() {
   // liquid filling inside it) reads on screen instead of being viewed edge-on
   camera.lookAt(0, -0.05, 0);
 
+  // Neutral studio IBL: without it the Glass transmission material has
+  // nothing to refract (reads as a flat gray blob) and the GoldRim/ceramic
+  // PBR materials have no specular reflections, so the beans in particular
+  // read as near-black silhouettes instead of lit coffee beans. The canvas
+  // itself stays transparent (scene.background is untouched) so this only
+  // feeds material lighting, not the page's dark backdrop.
+  // scene.environmentIntensity (r170+) scales the whole contribution back
+  // down: pixel-diffed against the pre-Task-10 screenshots (a fixed point on
+  // the cup body measured ~(91,86,65) before), anything above ~0.1 visibly
+  // brightened *and* desaturated the cup toward gray — RoomEnvironment is a
+  // neutral-gray studio, so its IBL dilutes the warm cream/gold tone the
+  // brand relies on. 0.06 was the highest value that stayed within ~10-20%
+  // of the original brightness/warmth at that sample point while still
+  // giving the rim/glass a real (if subtle) Fresnel reflection — the void
+  // behind the cup is untouched either way (confirmed byte-identical).
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment()).texture;
+  scene.environmentIntensity = 0.06;
+  pmrem.dispose();
+
   /* KOOB lighting: warm gold key upper-right, teal fill left, soft ambient —
-     matches the art-direction lock in MEDIA_GENERATION.md */
-  const key = new THREE.DirectionalLight(0xc8a96e, 2.4);
+     matches the art-direction lock in MEDIA_GENERATION.md. Energies were
+     trimmed slightly from their pre-IBL values (key 2.4→2.0, fill 0.9→0.75,
+     ambient 0.35→0.28) to offset the environment map's added light so overall
+     brightness stays close to the pre-Task-10 screenshots once the env map
+     is in — see the environmentIntensity comment above for the measurement. */
+  const key = new THREE.DirectionalLight(0xc8a96e, 2.0);
   key.position.set(0.6, 0.9, 0.5);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0x1a6b52, 0.9);
+  const fill = new THREE.DirectionalLight(0x1a6b52, 0.75);
   fill.position.set(-0.7, 0.2, 0.4);
   scene.add(fill);
-  scene.add(new THREE.AmbientLight(0xf5f0e8, 0.35));
+  scene.add(new THREE.AmbientLight(0xf5f0e8, 0.28));
 
   const state = { ...INITIAL_STATE };
   const parallax = { x: 0, y: 0 };
@@ -88,7 +118,12 @@ function boot() {
   let propParts = null;
   rig.add(cupParts.group);
 
-  window.__koob3d = { state, scene, renderer, tier };
+  // gold particle burst: parked invisible at the cup rim, fired once per
+  // WAYPOINTS entry (see the ScrollTrigger wiring below)
+  const goldBurst = buildGoldBurst();
+  rig.add(goldBurst.points);
+
+  window.__koob3d = { state, scene, renderer, tier, goldBurst };
 
   const urls = modelUrls(tier);
   const draco = new DRACOLoader().setDecoderPath(
@@ -100,7 +135,9 @@ function boot() {
 
   Promise.all([loader.loadAsync(urls.cup), loader.loadAsync(urls.props)])
     .then(([cupGltf, propsGltf]) => {
-      rig.remove(cupParts.group);
+      const oldPlaceholder = cupParts.group;
+      rig.remove(oldPlaceholder);
+      disposeObject3D(oldPlaceholder); // placeholder is discarded for good — free its GPU buffers
       cupParts = adoptCupGltf(cupGltf, rig);
       propParts = adoptPropsGltf(propsGltf, scene, tier);
       window.__koob3d.assets = { cup: urls.cup, props: urls.props };
@@ -182,6 +219,19 @@ function boot() {
           scrub: c.scrub,
           fastScrollEnd: true,
         },
+      });
+    }
+  }
+
+  /* ---- WAYPOINTS: one-shot effects layered on top of the scrub tweens
+     above. Each entry gets its own ScrollTrigger (onEnter, not scrubbed) so
+     the effect fires exactly once as the reader crosses the milestone. */
+  for (const w of WAYPOINTS) {
+    if (w.effect === "goldBurst") {
+      window.ScrollTrigger.create({
+        trigger: w.trigger,
+        start: w.start,
+        onEnter: () => triggerGoldBurst(goldBurst, invalidate),
       });
     }
   }
@@ -315,6 +365,12 @@ function adoptCupGltf(gltf, rig) {
   const steam = ["Steam1", "Steam2", "Steam3"].map((n) => {
     const node = find(n);
     const mesh = firstMesh(node);
+    // GLTFLoader de-dupes identical materials across nodes, so all three
+    // Steam1-3 planes arrive sharing one material instance: without cloning,
+    // applyState's per-plane opacity gradient (0.50/0.38/0.26) just has each
+    // plane overwrite the same .opacity in turn, and every plane ends up at
+    // whatever the last one set it to.
+    mesh.material = mesh.material.clone();
     mesh.material.transparent = true;
     mesh.material.depthWrite = false;
     mesh.material.opacity = 0;
@@ -351,6 +407,12 @@ function adoptPropsGltf(gltf, scene, tier) {
   const count = tier === "mobile" ? 12 : 30;
   const beans = new THREE.InstancedMesh(bean.geometry, bean.material, count);
   beans.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  // InstancedMesh derives its culling bounds from the single source
+  // geometry, not the spread of per-instance transforms, so the whole field
+  // of beans (scattered ±0.45 in x, ±0.25 in y, out to z -0.4) can vanish the
+  // moment the camera/rig framing shifts the (uninstanced) geometry origin
+  // out of frame. The instances are cheap; skip frustum culling entirely.
+  beans.frustumCulled = false;
   const seeds = [];
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(),
         p = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1);
@@ -371,4 +433,79 @@ function adoptPropsGltf(gltf, scene, tier) {
   const glassBaseScale = glass.scale.x || 1;
   scene.add(beans, glass, portafilter);
   return { beans, seeds, glass, portafilter, glassBaseScale, m, q, p, s };
+}
+
+/* Frees GPU buffers for a whole subtree. Used once the placeholder cup is
+   swapped out for the real GLB and permanently discarded — otherwise its
+   geometries/materials just leak for the life of the page. */
+function disposeObject3D(obj) {
+  obj.traverse((o) => {
+    if (!o.isMesh) return;
+    o.geometry?.dispose();
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    mats.forEach((m) => m?.dispose());
+  });
+}
+
+/* A 60-point cloud parked invisible at the cup rim (rig-local coordinates,
+   so it inherits the cup's current position/rotation/scale every frame same
+   as the cup meshes themselves). triggerGoldBurst() resets it to a ring at
+   the rim and animates outward. */
+function buildGoldBurst() {
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(GOLD_BURST_COUNT * 3);
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color: GOLD_BURST_COLOR,
+    size: 0.012,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const points = new THREE.Points(geometry, material);
+  points.visible = false;
+  points.frustumCulled = false; // rim-anchored burst can reach past the cup's own bounds mid-animation
+  // each particle's fixed angle around the rim ring + a random upward-drift
+  // bias, both reused unchanged on every subsequent trigger
+  const dirs = [];
+  for (let i = 0; i < GOLD_BURST_COUNT; i++) {
+    const a = (i / GOLD_BURST_COUNT) * Math.PI * 2;
+    dirs.push({ cos: Math.cos(a), sin: Math.sin(a), up: 0.5 + Math.random() * 0.7 });
+  }
+  return {
+    points, dirs,
+    rimRadius: 0.037, rimY: 0.036, // rig-local cup-rim estimate, shared by placeholder & GLB pivots
+    tween: { t: 1 }, // t=1 => settled/hidden; triggerGoldBurst rewinds to 0
+  };
+}
+
+/* Fires one burst: rewinds the shared progress tween to 0 and, every frame
+   until it reaches 1 (0.9s, power2.out), re-positions each particle along
+   its fixed rim angle at a growing radius/height while fading opacity 1→0,
+   then hides the cloud again. */
+function triggerGoldBurst(burst, invalidate) {
+  const { points, dirs, rimRadius, rimY, tween } = burst;
+  const pos = points.geometry.attributes.position;
+  points.visible = true;
+  points.material.opacity = 1;
+  window.gsap.killTweensOf(tween);
+  tween.t = 0;
+  window.gsap.to(tween, {
+    t: 1,
+    duration: 0.9,
+    ease: "power2.out",
+    onUpdate: () => {
+      const reach = tween.t * 0.16;
+      for (let i = 0; i < dirs.length; i++) {
+        const d = dirs[i];
+        pos.setXYZ(i, d.cos * (rimRadius + reach), rimY + d.up * reach, d.sin * (rimRadius + reach));
+      }
+      pos.needsUpdate = true;
+      points.material.opacity = 1 - tween.t;
+      invalidate();
+    },
+    onComplete: () => { points.visible = false; },
+  });
 }

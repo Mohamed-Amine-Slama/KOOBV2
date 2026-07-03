@@ -7,6 +7,7 @@ import {
   INITIAL_STATE,
   CHOREOGRAPHY,
   ROASTS,
+  WAYPOINTS,
 } from "../../js/koob3d-core.js";
 
 test("shouldUse3D: needs WebGL and no reduced-motion", () => {
@@ -88,5 +89,18 @@ test("ROASTS: three roasts with hex colors", () => {
   for (const r of ROASTS) {
     assert.match(r.body, /^#[0-9a-f]{6}$/i);
     assert.match(r.surface, /^#[0-9a-f]{6}$/i);
+  }
+});
+
+const KNOWN_EFFECTS = ["goldBurst"];
+
+test("WAYPOINTS: unique ids, valid section triggers, known effects", () => {
+  const ids = WAYPOINTS.map((w) => w.id);
+  assert.equal(new Set(ids).size, ids.length);
+  const validTriggers = [...SECTION_IDS, "#newsletter"];
+  for (const w of WAYPOINTS) {
+    assert.ok(validTriggers.includes(w.trigger), `bad trigger ${w.trigger}`);
+    assert.equal(typeof w.start, "string");
+    assert.ok(KNOWN_EFFECTS.includes(w.effect), `unknown effect ${w.effect}`);
   }
 });

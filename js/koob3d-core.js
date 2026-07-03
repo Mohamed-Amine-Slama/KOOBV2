@@ -58,3 +58,12 @@ export const CHOREOGRAPHY = [
   { id: "outro", trigger: "#quiz", start: "top 80%", end: "bottom top",
     scrub: 1, to: { sceneOpacity: 0, cupScale: 0.35, steam: 0 } },
 ];
+
+/* One-shot moments layered on top of the scrubbed CHOREOGRAPHY above: a
+   ScrollTrigger per entry fires `effect` once via onEnter (not scrubbed).
+   cupFull lands near the end of the hero fill; quizEnter greets the reader
+   as the quiz section arrives. */
+export const WAYPOINTS = [
+  { id: "cupFull", trigger: "#hero", start: "bottom 25%", effect: "goldBurst" },
+  { id: "quizEnter", trigger: "#quiz", start: "top 60%", effect: "goldBurst" },
+];
