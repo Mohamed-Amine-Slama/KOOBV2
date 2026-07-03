@@ -52,6 +52,13 @@ if (root.classList.contains("has-3d")) boot();
 const beanEuler = new THREE.Euler();
 
 function downgrade(reason) {
+  // Idempotent: teardown() already killed every tween/listener/ScrollTrigger
+  // and this function has already stripped has-3d on a first call, so a
+  // second call (e.g. forceDowngrade() invoked twice, or a webglcontextlost
+  // event arriving after the canvas is already gone) must be a no-op —
+  // otherwise it re-runs __startBeanField() and ScrollTrigger.refresh()
+  // against a page that's already downgraded.
+  if (!root.classList.contains("has-3d")) return;
   console.warn("[koob3d] downgrading to legacy experience:", reason);
   if (currentTeardown) currentTeardown();
   root.classList.remove("has-3d");
@@ -73,6 +80,18 @@ function downgrade(reason) {
 }
 
 function boot() {
+  // The 3D layer owns the hero visual once has-3d holds; the legacy fallback
+  // <video> underneath never becomes visible, but browsers still decode a
+  // hidden autoplaying <video> in the background. Stop that decode for the
+  // (expected) case boot succeeds — downgrade() above restores muted/loop/
+  // play if the 3D layer ever hands control back to it mid-session.
+  const heroVideo = document.querySelector(".hero-fill-video");
+  if (heroVideo) {
+    heroVideo.pause();
+    heroVideo.removeAttribute("autoplay");
+    heroVideo.preload = "none";
+  }
+
   const canvas = document.getElementById("koob-3d");
   let renderer;
   try {
@@ -158,7 +177,25 @@ function boot() {
   const portalVeil = document.getElementById("portal-veil");
   const portalFlash = document.getElementById("portal-flash");
   const portalHint = portalVeil ? portalVeil.querySelector(".portal-hint") : null;
-  root.classList.add("portal-active");
+
+  /* ---- reload-mid-page guard: browsers restore scrollY *before* this module
+     runs, so a reader who hits F5 deep in the page (past the portal runway)
+     lands here with scroll already at, say, the quiz section. The scrub
+     tweens created below resolve correctly against that scrollY the instant
+     their ScrollTriggers are created (sceneOpacity 0, portalT 1) — but two
+     things elsewhere in boot() assume a top-of-page load and must be held
+     back instead: portal-active here (would raise the veil/flash layers for
+     the one frame before the first tick corrects it) and the time-based
+     "boot" CHOREOGRAPHY tween further down (which fades state.sceneOpacity
+     to 1 on a fixed 3.2s timer regardless of scroll — a ghost cup fading in
+     over whatever section the reader actually landed on). Both are skipped
+     when pastPortal is true; a normal top-of-page load (pastPortal false) is
+     unaffected. */
+  const portalRunway = document.getElementById("portal-entry");
+  const pastPortal =
+    (window.scrollY || document.documentElement.scrollTop) >
+    (portalRunway ? portalRunway.offsetHeight : innerHeight) - innerHeight;
+  if (!pastPortal) root.classList.add("portal-active");
 
   /* ---- render-loop discipline: hard pause, tab-visibility suspend, and an
      adaptive DPR drop all hang off the same `tick` function, so they're
@@ -231,6 +268,16 @@ function boot() {
   let portalParts = null; // set when portal.glb streams in (see Promise.all below)
   rig.add(cupParts.group);
 
+  // hero trio: two static lidded clones flanking the journey cup. Parented to
+  // the scene (not the rig) so choreography/parallax only move the middle cup;
+  // position mirrors the rig's hero framing (cupX 1.1, cupY -0.2)·0.22 plus
+  // the cup group's own -0.06.
+  const sideCupsGroup = new THREE.Group();
+  sideCupsGroup.position.set(0.242, -0.104, 0);
+  scene.add(sideCupsGroup);
+  let sideCupParts = buildSideCups(cupParts);
+  sideCupsGroup.add(sideCupParts.group);
+
   // gold particle burst: parked invisible at the cup rim, fired once per
   // WAYPOINTS entry (see the ScrollTrigger wiring below)
   const goldBurst = buildGoldBurst();
@@ -256,6 +303,10 @@ function boot() {
       rig.remove(oldPlaceholder);
       disposeObject3D(oldPlaceholder); // placeholder is discarded for good — free its GPU buffers
       cupParts = adoptCupGltf(cupGltf, rig);
+      sideCupsGroup.remove(sideCupParts.group);
+      disposeObject3D(sideCupParts.group);
+      sideCupParts = buildSideCups(cupParts);
+      sideCupsGroup.add(sideCupParts.group);
       propParts = adoptPropsGltf(propsGltf, scene, tier);
       portalParts = adoptPortalGltf(portalGltf, scene);
       window.__koob3d.assets = { cup: urls.cup, props: urls.props, portal: urls.portal };
@@ -348,6 +399,21 @@ function boot() {
     cupParts.steam.forEach((s, n) => {
       s.material.opacity = state.steam * (0.5 - n * 0.12);
     });
+    // lid-off: rises, tilts, drifts right, fades near the top of the arc
+    // (heroLid scrubs state.lidLift 0→1; fully reversible on scroll-up)
+    const lid = cupParts.lid;
+    const ll = state.lidLift;
+    lid.position.y = lid.userData.baseY + ll * 0.12;
+    lid.position.x = lid.userData.baseX + ll * 0.04;
+    lid.rotation.z = -0.85 * ll;
+    const lidFade = 1 - smooth01((ll - 0.6) / 0.35);
+    for (const m of cupParts.lidMaterials) m.opacity = lidFade;
+    lid.visible = lidFade > 0.02;
+    // hero trio flanks: hold lids, fade + sink back as #story arrives
+    const sc = state.sideCups;
+    for (const m of sideCupParts.materials) m.opacity = sc;
+    sideCupParts.group.position.z = -(1 - sc) * 0.3;
+    sideCupParts.group.visible = sc > 0.01;
     if (propParts) {
       propParts.beans.visible = state.beans > 0.01;
       // Glass is a MeshPhysicalMaterial with transmission — fading it via
@@ -435,6 +501,11 @@ function boot() {
   const tweens = [];
   for (const c of CHOREOGRAPHY) {
     if (c.trigger === null) {
+      // Skip on a reload-mid-page landing (see the pastPortal guard above):
+      // the scrub tweens below already own sceneOpacity for wherever the
+      // reader actually is, and this fixed-timer fade has no idea where that
+      // is — letting it run would fade a ghost cup in over that section.
+      if (pastPortal) continue;
       tweens.push(window.gsap.to(state, {
         ...c.to,
         duration: c.duration,
@@ -505,10 +576,16 @@ function boot() {
   window.addEventListener("resize", resize);
   resize();
 
-  canvas.addEventListener("webglcontextlost", (e) => {
+  // Named (rather than inline) so teardown() below can remove it — otherwise
+  // it survives on the detached canvas element after a downgrade() and can
+  // fire again on a stray contextlost event, re-entering downgrade() (now a
+  // no-op thanks to its own idempotency guard, but the listener should still
+  // be gone like every other one teardown() cleans up).
+  function onContextLost(e) {
     e.preventDefault();
     downgrade("WebGL context lost");
-  });
+  }
+  canvas.addEventListener("webglcontextlost", onContextLost);
 
   /* ---- full teardown, run once by downgrade() before it restores the
      legacy experience: without this, the ticker machinery, the three
@@ -525,6 +602,7 @@ function boot() {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("resize", resize);
     document.removeEventListener("visibilitychange", onVisibilityChange);
+    canvas.removeEventListener("webglcontextlost", onContextLost);
     tweens.forEach((t) => t.kill());
     scrollTriggers.forEach((st) => st.kill());
   }
@@ -571,34 +649,42 @@ function boot() {
   }
 }
 
-/* Placeholder KOOB cup from a lathe profile — same object names and
-   pivots as the real GLB so Task 9 is a drop-in swap. */
+/* Placeholder KOOB paper cup from a lathe profile — same object names and
+   pivots as the real GLB so the stream-in swap is drop-in. */
 function buildPlaceholderCup() {
   const group = new THREE.Group();
   const pts = [];
   const profile = [
-    [0.0, 0.004], [0.024, 0.004], [0.03, 0.006], [0.033, 0.012],
-    [0.036, 0.03], [0.038, 0.055], [0.04, 0.078], [0.041, 0.088],
+    [0.0, 0.0], [0.026, 0.0], [0.028, 0.004],
+    [0.0345, 0.052], [0.04, 0.096], [0.0415, 0.102],
   ];
   for (const [x, y] of profile) pts.push(new THREE.Vector2(x, y));
   const cup = new THREE.Mesh(
     new THREE.LatheGeometry(pts, 48),
-    new THREE.MeshStandardMaterial({ color: 0xf5f0e8, roughness: 0.32, side: THREE.DoubleSide })
+    new THREE.MeshStandardMaterial({ color: 0xd3c3ab, roughness: 0.65, side: THREE.DoubleSide })
   );
   cup.name = "Cup";
-  const saucer = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.07, 0.05, 0.008, 48),
-    cup.material.clone()
-  );
-  saucer.name = "Saucer";
-  saucer.position.y = -0.004;
+  // black dome lid: clamp band + raised sip plateau, origin at the rim plane
+  const lidMat = new THREE.MeshStandardMaterial({
+    color: 0x141414, roughness: 0.35, transparent: true,
+  });
+  const lid = new THREE.Group();
+  lid.name = "Lid";
+  const lidRim = new THREE.Mesh(new THREE.CylinderGeometry(0.0445, 0.0435, 0.0075, 48), lidMat);
+  lidRim.position.y = 0.0037;
+  const lidTop = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.033, 0.008, 48), lidMat);
+  lidTop.position.y = 0.0105;
+  lid.add(lidRim, lidTop);
+  lid.position.y = 0.102;
+  lid.userData.baseX = 0;
+  lid.userData.baseY = 0.102;
   const liquid = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.034, 0.03, 0.06, 40),
+    new THREE.CylinderGeometry(0.0365, 0.026, 0.09, 40),
     new THREE.MeshStandardMaterial({ color: 0x3c2414, roughness: 0.15 })
   );
   liquid.name = "Liquid";
-  liquid.geometry.translate(0, 0.03, 0); // pivot at base → scale.y fills upward
-  liquid.position.y = 0.012;
+  liquid.geometry.translate(0, 0.045, 0); // pivot at base → scale.y fills upward
+  liquid.position.y = 0.006;
   const steam = [];
   for (let n = 0; n < 3; n++) {
     const s = new THREE.Mesh(
@@ -609,14 +695,43 @@ function buildPlaceholderCup() {
       })
     );
     s.name = `Steam${n + 1}`;
-    s.position.set((n - 1) * 0.018, 0.16, 0);
-    s.userData.baseY = 0.16;
+    s.position.set((n - 1) * 0.018, 0.19, 0);
+    s.userData.baseY = 0.19;
     steam.push(s);
     group.add(s);
   }
-  group.add(cup, saucer, liquid);
-  group.position.y = -0.05;
-  return { group, cup, saucer, liquid, steam };
+  group.add(cup, lid, liquid);
+  group.position.y = -0.06;
+  return { group, cup, lid, lidMaterials: [lidMat], liquid, steam };
+}
+
+/* Two lidded clones flanking the journey cup for the hero trio. Materials
+   are cloned so the #story fade (state.sideCups → opacity) can never touch
+   the middle cup's originals. Works with placeholder and GLB cupParts alike. */
+function buildSideCups(cupParts) {
+  const group = new THREE.Group();
+  const materials = [];
+  const makeClone = (dx, dz, rotY, scale) => {
+    const c = new THREE.Group();
+    for (const src of [cupParts.cup, cupParts.lid]) {
+      const n = src.clone(true);
+      n.traverse((o) => {
+        if (o.isMesh) {
+          o.material = o.material.clone();
+          o.material.transparent = true;
+          materials.push(o.material);
+        }
+      });
+      c.add(n);
+    }
+    c.position.set(dx, 0, dz);
+    c.rotation.y = rotY;
+    c.scale.setScalar(scale);
+    group.add(c);
+  };
+  makeClone(-0.115, -0.10, 0.55, 0.92); // left flank, angled toward center
+  makeClone(0.10, -0.14, -0.7, 0.88);   // right flank, further back
+  return { group, materials };
 }
 
 /* glTF gives one Mesh per material on a node; an object exported with N
@@ -633,9 +748,9 @@ function firstMesh(obj) {
   return mesh;
 }
 
-/* Binds the loaded cup GLB by the Task 8 name contract: Cup, Saucer,
-   Liquid, Steam1-3. Mirrors buildPlaceholderCup()'s returned shape so
-   applyState/animateSteam work unchanged against either. */
+/* Binds the loaded cup GLB by the name contract: Cup, Lid, Liquid, Steam1-3.
+   Mirrors buildPlaceholderCup()'s returned shape so applyState/animateSteam
+   work unchanged against either. */
 function adoptCupGltf(gltf, rig) {
   const g = gltf.scene;
   const find = (n) => {
@@ -644,7 +759,7 @@ function adoptCupGltf(gltf, rig) {
     return o;
   };
   const cup = find("Cup");
-  const saucer = find("Saucer");
+  const lid = find("Lid");
   const liquid = find("Liquid");
   const steamNodes = ["Steam1", "Steam2", "Steam3"].map(find);
   const steamMeshes = steamNodes.map(firstMesh);
@@ -663,8 +778,12 @@ function adoptCupGltf(gltf, rig) {
     mesh.material.transparent = true;
     mesh.material.depthWrite = false;
     mesh.material.opacity = 0;
-    node.userData.baseY = node.position.y;
-    return node; // node === mesh for every current export (single material)
+    mesh.userData.baseY = mesh.position.y;
+    // Return the mesh whose material was just cloned (identical to `node`
+    // for every current single-material export), not `node` itself: a
+    // future multi-material Steam export would make `node` a Group without
+    // a .material, and applyState's `s.material.opacity = ...` would throw.
+    return mesh;
   });
   sharedSteamMaterial.dispose();
   // The baked Liquid material (Espresso) is replaced with one we own so the
@@ -676,11 +795,24 @@ function adoptCupGltf(gltf, rig) {
   });
   // Liquid's translation is its base pivot (y≈0.007 in the GLB) — applyState's
   // liquid.scale.y fills upward from there, same contract as the placeholder.
-  // Group offset matches the placeholder's framing (verified: real cup+saucer
-  // measure ~0.09 units tall, essentially identical to the placeholder's).
-  g.position.y = -0.05;
+  // The lid fades out near the top of its lift arc; clone its material(s) so
+  // opacity writes never leak into the side-cup clones sharing the GLB source
+  // (same GLTFLoader de-dupe hazard as the steam planes above).
+  const lidMaterials = [];
+  lid.traverse((o) => {
+    if (o.isMesh) {
+      o.material = o.material.clone();
+      o.material.transparent = true;
+      lidMaterials.push(o.material);
+    }
+  });
+  lid.userData.baseX = lid.position.x;
+  lid.userData.baseY = lid.position.y;
+  // Group offset frames the taller paper cup (~0.116 with lid) the way the
+  // ceramic cup+saucer (~0.09) sat at -0.05.
+  g.position.y = -0.06;
   rig.add(g);
-  return { group: g, cup, saucer, liquid, steam };
+  return { group: g, cup, lid, lidMaterials, liquid, steam };
 }
 
 /* Binds the loaded props GLB: Bean (instanced 30/12), Portafilter (hidden,
