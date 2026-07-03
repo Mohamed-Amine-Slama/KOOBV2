@@ -13,7 +13,12 @@ import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
+// An explicit PORT is honored exactly; the default hops to the next free
+// port when 8123 is taken (a second `npm run serve`, a screenshot run's
+// server still up) instead of crashing with an EADDRINUSE stack trace.
 const PORT = Number(process.env.PORT) || 8123;
+const PORT_IS_EXPLICIT = Boolean(process.env.PORT);
+const MAX_PORT_HOPS = 10;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -23,6 +28,7 @@ const MIME = {
   ".json": "application/json",
   ".glb": "model/gltf-binary",
   ".gltf": "model/gltf+json",
+  ".ktx2": "image/ktx2",
   ".wasm": "application/wasm",
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -37,7 +43,7 @@ const MIME = {
   ".txt": "text/plain; charset=utf-8",
 };
 
-createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   try {
     const urlPath = decodeURIComponent(new URL(req.url, "http://x").pathname);
     let rel = normalize(urlPath).replace(/^([/\\])+/, "");
@@ -56,7 +62,24 @@ createServer(async (req, res) => {
   } catch (err) {
     res.writeHead(err?.code === "ENOENT" ? 404 : 500).end("not found");
   }
-}).listen(PORT, () => {
-  console.log(`KOOB dev server → http://localhost:${PORT}/`);
+});
+
+let port = PORT;
+server.on("error", (err) => {
+  if (err.code !== "EADDRINUSE") throw err;
+  if (PORT_IS_EXPLICIT || port >= PORT + MAX_PORT_HOPS) {
+    console.error(
+      `Port ${port} is already in use — is the dev server already running?\n` +
+        `Stop it, or pick another port: PORT=${port + 1} npm run serve`
+    );
+    process.exit(1);
+  }
+  console.warn(`Port ${port} in use, trying ${port + 1}…`);
+  port += 1;
+  server.listen(port);
+});
+
+server.listen(port, () => {
+  console.log(`KOOB dev server → http://localhost:${port}/`);
   console.log("(Ctrl+C to stop)");
 });
