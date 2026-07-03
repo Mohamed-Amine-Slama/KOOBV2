@@ -6,8 +6,9 @@ cylindrically — u runs around the cup (seam at the back), v runs base→rim.
 The sticker is drawn at a tunable u/v so the logo can be re-aimed at the
 camera without touching the mesh: re-run with a different --u and re-export.
 
-Usage: python3 tools/make_cup_texture.py [--u 0.25] [--v 0.52] [--radius 430]
-Writes: assets/models/src/paper_col.png   (2048x2048 albedo)
+Usage: python3 tools/make_cup_texture.py [--size 2048] [--u 0.25] [--v 0.52]
+       [--radius auto] — radius defaults to 430 scaled by size/2048
+Writes: assets/models/src/paper_col.png   (size x size albedo)
         assets/models/src/logo_cream.png  (keyed logo, kept for reuse/debug)
 """
 import argparse
@@ -18,7 +19,6 @@ from PIL import Image, ImageDraw
 LOGO = "assets/logo 2.pdf_20260703_174119_0000.png"
 OUT = "assets/models/src/paper_col.png"
 LOGO_OUT = "assets/models/src/logo_cream.png"
-SIZE = 2048
 KRAFT = (211, 195, 171)   # warm kraft beige, sampled from the product photos
 STICKER = (16, 30, 25)    # near-black with the brand green cast
 CREAM = (239, 227, 207)   # logo cream
@@ -39,19 +39,23 @@ def key_logo():
     return out
 
 
-def kraft_base():
-    """Kraft sheet with vertical paper grain and light speckle."""
-    img = Image.new("RGB", (SIZE, SIZE), KRAFT)
+def kraft_base(size):
+    """Kraft sheet with a whisper of vertical grain and light speckle.
+
+    Keep the grain amplitude tiny: KTX2's ETC1S encoding turns stronger
+    per-column luminance variation into visible chroma banding on the cup
+    (observed as yellow vertical streaks in-browser at +/-5)."""
+    img = Image.new("RGB", (size, size), KRAFT)
     px = img.load()
     rnd = random.Random(7)  # seeded: texture is reproducible run to run
-    for x in range(SIZE):
-        dv = rnd.randint(-4, 4)
-        for y in range(SIZE):
+    for x in range(size):
+        dv = rnd.randint(-2, 2)
+        for y in range(size):
             r, g, b = px[x, y]
             px[x, y] = (r + dv, g + dv, b + dv)
-    for _ in range(9000):
-        x, y = rnd.randrange(SIZE), rnd.randrange(SIZE)
-        d = rnd.randint(-10, 6)
+    for _ in range(int(6000 * (size / 2048) ** 2)):
+        x, y = rnd.randrange(size), rnd.randrange(size)
+        d = rnd.randint(-7, 4)
         r, g, b = px[x, y]
         px[x, y] = (r + d, g + d, b + d)
     return img
@@ -59,17 +63,21 @@ def kraft_base():
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--size", type=int, default=2048)
     ap.add_argument("--u", type=float, default=0.25)
     ap.add_argument("--v", type=float, default=0.52)
-    ap.add_argument("--radius", type=int, default=430)
+    ap.add_argument("--radius", type=int, default=0)  # 0 → 430 scaled by size
     # map-height / circumference at sticker mid-height: 0.1035 / (2*pi*0.0355)
     ap.add_argument("--aspect", type=float, default=0.464)
     args = ap.parse_args()
+    SIZE = args.size
+    if not args.radius:
+        args.radius = round(430 * SIZE / 2048)
 
     logo = key_logo()
     logo.save(LOGO_OUT)
 
-    base = kraft_base()
+    base = kraft_base(SIZE)
     cx, cy = int(args.u * SIZE), int((1 - args.v) * SIZE)  # v=0 is image bottom
     rx = int(args.radius * args.aspect)
     ry = args.radius

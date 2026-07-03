@@ -151,7 +151,11 @@ function boot() {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const roomEnv = new RoomEnvironment();
   scene.environment = pmrem.fromScene(roomEnv).texture;
-  scene.environmentIntensity = 0.06;
+  // 0.06 was measured against the ceramic cup (see above); the kraft paper
+  // cup is both lighter and rougher, so it takes a touch more IBL (0.09,
+  // still under the ~0.1 desaturation ceiling) to keep body in the paper
+  // now that the key light is trimmed below.
+  scene.environmentIntensity = 0.09;
   pmrem.dispose();
   // fromScene() has already baked roomEnv into the PMREM texture above; the
   // temporary studio-room meshes it built are otherwise never referenced
@@ -164,7 +168,9 @@ function boot() {
      ambient 0.35→0.28) to offset the environment map's added light so overall
      brightness stays close to the pre-Task-10 screenshots once the env map
      is in — see the environmentIntensity comment above for the measurement. */
-  const key = new THREE.DirectionalLight(0xc8a96e, 2.0);
+  // key trimmed 2.0→1.55 for the paper cup: the light kraft albedo was
+  // rolling off to white under ACES on lit faces, flattening the cups
+  const key = new THREE.DirectionalLight(0xc8a96e, 1.55);
   key.position.set(0.6, 0.9, 0.5);
   scene.add(key);
   const fill = new THREE.DirectionalLight(0x1a6b52, 0.75);
