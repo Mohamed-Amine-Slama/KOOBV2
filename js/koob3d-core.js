@@ -36,6 +36,9 @@ export const INITIAL_STATE = {
   // (camera dolly, mist dissolve, veil/flash DOM layers) derives from this one
   // scalar in koob3d.js's applyPortalState().
   portalT: 0,
+  // 0 = lid seated on the middle cup, 1 = lifted clear (heroLid scrubs it).
+  // sideCups: 1 = hero trio flanks visible, 0 = faded out (story scrubs it).
+  lidLift: 0, sideCups: 1,
 };
 
 /* Liquid colors per collection slide, matching the existing
@@ -58,10 +61,17 @@ export const CHOREOGRAPHY = [
      the top of the viewport and the cup journey takes over. */
   { id: "portalEntry", trigger: "#portal-entry", start: "top top", end: "bottom top",
     scrub: 0.8, to: { portalT: 1 } },
-  { id: "hero", trigger: "#hero", start: "top top", end: "bottom top",
+  /* The hero scrub is two phases with a shared boundary at 40% of the
+     section: first the middle cup's lid lifts away, then — only once the cup
+     is open — the coffee fills and the steam rises. Splitting entries (rather
+     than staggering one tween) keeps every channel single-writer, same rule
+     as the steam-scrub-conflict fix above. */
+  { id: "heroLid", trigger: "#hero", start: "top top", end: "40% top",
+    scrub: 1.2, to: { lidLift: 1 } },
+  { id: "heroFill", trigger: "#hero", start: "40% top", end: "bottom top",
     scrub: 1.2, to: { liquidFill: 1, steam: 1, cupRotY: 0.5, cupRotX: -0.16 } },
   { id: "story", trigger: "#story", start: "top 85%", end: "bottom 40%",
-    scrub: 1.2, to: { cupX: -1.15, cupScale: 0.55, beans: 1, roast: 0 } },
+    scrub: 1.2, to: { cupX: -1.15, cupScale: 0.55, beans: 1, roast: 0, sideCups: 0 } },
   { id: "collection", trigger: "#collection", start: "top top", end: "bottom bottom",
     scrub: 1, to: { cupX: 0, cupY: -0.1, cupScale: 1.15, cupRotY: 6.78, roast: 2, beans: 0.35 } },
   { id: "menu", trigger: "#menu", start: "top 70%", end: "top 15%",

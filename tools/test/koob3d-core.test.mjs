@@ -47,7 +47,7 @@ test("modelUrls: builds tiered paths and rejects junk", () => {
 const STATE_KEYS = [
   "cupX", "cupY", "cupZ", "cupRotX", "cupRotY", "cupScale",
   "liquidFill", "steam", "roast", "beans", "glass", "sceneOpacity",
-  "portalT",
+  "portalT", "lidLift", "sideCups",
 ];
 const SECTION_IDS = [
   "#portal-entry", "#hero", "#story", "#collection", "#menu",
@@ -77,7 +77,7 @@ test("CHOREOGRAPHY: unique ids, real section triggers, known keys", () => {
 
 test("CHOREOGRAPHY: normalized channels stay in [0,1], roast in range", () => {
   for (const c of CHOREOGRAPHY) {
-    for (const k of ["liquidFill", "steam", "beans", "glass", "sceneOpacity", "portalT"]) {
+    for (const k of ["liquidFill", "steam", "beans", "glass", "sceneOpacity", "portalT", "lidLift", "sideCups"]) {
       if (k in c.to) assert.ok(c.to[k] >= 0 && c.to[k] <= 1, `${c.id}.${k}`);
     }
     if ("roast" in c.to) {
@@ -105,4 +105,24 @@ test("WAYPOINTS: unique ids, valid section triggers, known effects", () => {
     assert.equal(typeof w.start, "string");
     assert.ok(KNOWN_EFFECTS.includes(w.effect), `unknown effect ${w.effect}`);
   }
+});
+
+test("hero: lid lifts first, fill takes over at the same scroll point", () => {
+  const ids = CHOREOGRAPHY.map((c) => c.id);
+  assert.ok(!ids.includes("hero"), "old monolithic hero entry should be gone");
+  const lid = CHOREOGRAPHY.find((c) => c.id === "heroLid");
+  const fill = CHOREOGRAPHY.find((c) => c.id === "heroFill");
+  assert.ok(lid && fill);
+  assert.equal(lid.trigger, "#hero");
+  assert.equal(fill.trigger, "#hero");
+  assert.deepEqual(Object.keys(lid.to), ["lidLift"]);
+  assert.equal(lid.to.lidLift, 1);
+  assert.equal(lid.end, fill.start); // phase handoff, no gap and no overlap
+  assert.equal(fill.to.liquidFill, 1);
+  assert.equal(fill.to.steam, 1);
+});
+
+test("story fades the hero side cups out", () => {
+  const story = CHOREOGRAPHY.find((c) => c.id === "story");
+  assert.equal(story.to.sideCups, 0);
 });
