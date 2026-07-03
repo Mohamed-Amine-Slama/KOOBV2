@@ -87,9 +87,14 @@ function boot() {
   // giving the rim/glass a real (if subtle) Fresnel reflection — the void
   // behind the cup is untouched either way (confirmed byte-identical).
   const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment()).texture;
+  const roomEnv = new RoomEnvironment();
+  scene.environment = pmrem.fromScene(roomEnv).texture;
   scene.environmentIntensity = 0.06;
   pmrem.dispose();
+  // fromScene() has already baked roomEnv into the PMREM texture above; the
+  // temporary studio-room meshes it built are otherwise never referenced
+  // again and would leak their geometries/materials for the life of the page.
+  disposeObject3D(roomEnv);
 
   /* KOOB lighting: warm gold key upper-right, teal fill left, soft ambient —
      matches the art-direction lock in MEDIA_GENERATION.md. Energies were
@@ -108,7 +113,61 @@ function boot() {
   const state = { ...INITIAL_STATE };
   const parallax = { x: 0, y: 0 };
   let needsRender = true;
-  const invalidate = () => { needsRender = true; };
+
+  /* ---- render-loop discipline: hard pause, tab-visibility suspend, and an
+     adaptive DPR drop all hang off the same `tick` function, so they're
+     declared together here rather than scattered through boot(). ---- */
+  let tickerAttached = false; // becomes true the instant attachTicker() runs below
+  let pauseTimer = null; // armed while idle; fires the hard detach after 2s
+  function attachTicker() {
+    if (tickerAttached) return;
+    window.gsap.ticker.add(tick);
+    tickerAttached = true;
+  }
+  function detachTicker() {
+    if (!tickerAttached) return;
+    window.gsap.ticker.remove(tick);
+    tickerAttached = false;
+  }
+  function armHardPause() {
+    if (pauseTimer !== null) return; // already armed for this idle streak
+    // Hard render pause: 2s of continuous idle (nothing invalidated, or the
+    // scene is fully faded) detaches `tick` from gsap.ticker entirely — not
+    // just an early return inside it, but zero per-frame calls at all, the
+    // same end state as renderer.setAnimationLoop(null). invalidate()
+    // reverses this instantly (scroll, pointermove, resize, a new GLB
+    // arriving) by re-adding the callback.
+    pauseTimer = setTimeout(() => {
+      pauseTimer = null;
+      detachTicker();
+    }, 2000);
+  }
+  function disarmHardPause() {
+    if (pauseTimer !== null) {
+      clearTimeout(pauseTimer);
+      pauseTimer = null;
+    }
+  }
+  const invalidate = () => {
+    needsRender = true;
+    // Don't fight the tab-visibility suspend below: while hidden, just record
+    // that a render is owed; the visibilitychange handler re-attaches (and
+    // calls invalidate() again) the moment the tab becomes visible.
+    if (document.hidden) return;
+    disarmHardPause();
+    attachTicker();
+  };
+
+  // Adaptive DPR: average frame time over a rolling window of the last 60
+  // *actively rendered* frames (idle/paused frames don't count — see tick()
+  // resetting lastActiveFrameTime whenever it skips). If that average creeps
+  // past a 24ms/frame budget (sustained GPU/CPU pressure), drop to
+  // pixelRatio 1 once — cheap, irreversible for this session, logged once.
+  const FRAME_TIME_WINDOW = 60;
+  const FRAME_TIME_BUDGET_MS = 24;
+  const frameTimeWindow = [];
+  let lastActiveFrameTime = null;
+  let dprDropped = false;
 
   /* ---- scene contents: instant placeholder cup, swapped for the real GLBs
      as soon as they stream in (both loaders run behind the preloader) ---- */
@@ -123,7 +182,7 @@ function boot() {
   const goldBurst = buildGoldBurst();
   rig.add(goldBurst.points);
 
-  window.__koob3d = { state, scene, renderer, tier, goldBurst };
+  window.__koob3d = { state, scene, renderer, tier, goldBurst, frames: 0 };
 
   const urls = modelUrls(tier);
   const draco = new DRACOLoader().setDecoderPath(
@@ -141,6 +200,30 @@ function boot() {
       cupParts = adoptCupGltf(cupGltf, rig);
       propParts = adoptPropsGltf(propsGltf, scene, tier);
       window.__koob3d.assets = { cup: urls.cup, props: urls.props };
+
+      // Recompute the gold-burst rim anchor from the real cup now that it's
+      // loaded — the placeholder-era estimate (rimRadius 0.037/rimY 0.036 in
+      // buildGoldBurst) was a guess at the eventual GLB's rim. Box3.setFromObject
+      // walks *world* matrices, which would bake in whatever scroll-driven
+      // transform `rig` currently happens to have — zero it out first so the
+      // box comes back in rig-local space, the same frame goldBurst.points is
+      // parented in. Safe to mutate transiently: applyState() unconditionally
+      // re-derives rig.position/rotation/scale from `state` on every active
+      // tick, and invalidate() below guarantees one runs before the next render.
+      const savedPos = rig.position.clone();
+      const savedRot = rig.rotation.clone();
+      const savedScale = rig.scale.clone();
+      rig.position.set(0, 0, 0);
+      rig.rotation.set(0, 0, 0);
+      rig.scale.setScalar(1);
+      rig.updateWorldMatrix(true, true);
+      const rimBox = new THREE.Box3().setFromObject(cupParts.cup);
+      rig.position.copy(savedPos);
+      rig.rotation.copy(savedRot);
+      rig.scale.copy(savedScale);
+      goldBurst.rimY = rimBox.max.y;
+      goldBurst.rimRadius = ((rimBox.max.x - rimBox.min.x) / 2) * 0.85;
+
       invalidate();
     })
     .catch((err) => downgrade(err));
@@ -176,16 +259,80 @@ function boot() {
   }
 
   /* ---- render-on-demand: gsap.ticker is already running for Lenis ---- */
-  window.gsap.ticker.add(() => {
-    if (!needsRender || state.sceneOpacity <= 0.001) return;
+  function tick() {
+    if (!needsRender || state.sceneOpacity <= 0.001) {
+      lastActiveFrameTime = null; // break the frame-time window across idle gaps
+      armHardPause();
+      return;
+    }
+    disarmHardPause();
     needsRender = false;
     applyState();
     animateSteam(cupParts.steam);
-    if (propParts) animateBeans(propParts);
+    if (propParts) {
+      animateGlass(propParts);
+      animateBeans(propParts);
+    }
     renderer.render(scene, camera);
+    window.__koob3d.frames++;
+
+    const now = performance.now();
+    if (lastActiveFrameTime !== null) {
+      const dt = now - lastActiveFrameTime;
+      frameTimeWindow.push(dt);
+      if (frameTimeWindow.length > FRAME_TIME_WINDOW) frameTimeWindow.shift();
+      if (!dprDropped && frameTimeWindow.length === FRAME_TIME_WINDOW) {
+        const avg = frameTimeWindow.reduce((a, b) => a + b, 0) / FRAME_TIME_WINDOW;
+        if (avg > FRAME_TIME_BUDGET_MS) {
+          dprDropped = true;
+          renderer.setPixelRatio(1);
+          console.warn(
+            `[koob3d] adaptive DPR: average frame time ${avg.toFixed(1)}ms ` +
+            `over the last ${FRAME_TIME_WINDOW} rendered frames exceeded the ` +
+            `${FRAME_TIME_BUDGET_MS}ms budget — dropping pixelRatio to 1`
+          );
+        }
+      }
+    }
+    lastActiveFrameTime = now;
+  }
+  attachTicker();
+
+  // Tab visibility: suspend the render loop entirely while the tab is
+  // hidden (rAF is throttled by the browser anyway, but detaching also stops
+  // gsap from bothering to call into a hidden canvas at all) and force one
+  // fresh render on return in case anything invalidated silently while away.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      disarmHardPause();
+      detachTicker();
+    } else {
+      invalidate();
+    }
   });
 
-  /* ---- choreography: every tween just mutates `state` ---- */
+  /* ---- choreography: every tween just mutates `state` ----
+     overwrite: "auto" fixes a real race: #hero ("top top" -> "bottom top",
+     scrollY 0-900 on a 1440x900 viewport) and #story ("top 85%" -> "bottom
+     40%", scrollY 206-1511) both write state.steam and their ranges overlap
+     for ~700px, so whichever tween's onUpdate happened to run last in a given
+     frame won the write — a visible flicker rather than a monotonic ramp.
+     A pure-data fix (narrowing #story's start so the ranges never touch)
+     would need something like "top 7%" (measured: #story's DOM top sits at
+     document y~971, so start must be <= ~8% of the viewport height to clear
+     #hero's end at 900) — far tighter than the brief's own "top 40%" example,
+     which measured out to still leaving ~290px of overlap. That's a big
+     enough shift to the trigger point that the cup/bean drift #story also
+     drives would only begin once the section is nearly fully in view,
+     instead of easing in as it arrives — a real pacing regression for a
+     one-line race fix. overwrite: "auto" instead lets GSAP hand off cleanly
+     at the moment the second tween starts actively rendering: it kills only
+     the *currently live* overlapping property on the *currently live* other
+     tween, picking up from whatever value is already on `state` (no jump).
+     Checked every other CHOREOGRAPHY pair's live pixel ranges via
+     ScrollTrigger.getAll() — #hero/#story is the only overlap in the whole
+     sequence, so applying this uniformly here doesn't change behavior
+     anywhere else (nothing else is ever both live at once). */
   for (const c of CHOREOGRAPHY) {
     if (c.trigger === null) {
       window.gsap.to(state, {
@@ -193,6 +340,7 @@ function boot() {
         duration: c.duration,
         delay: 3.2, // after the preloader venetian split
         ease: "power2.out",
+        overwrite: "auto",
         onUpdate: invalidate,
       });
     } else {
@@ -211,6 +359,7 @@ function boot() {
         ...c.to,
         ease: "none",
         immediateRender: false,
+        overwrite: "auto",
         onUpdate: invalidate,
         scrollTrigger: {
           trigger: c.trigger,
@@ -269,6 +418,19 @@ function boot() {
       s.rotation.y = Math.sin(steamT * 0.7 + n) * 0.2;
     });
     needsRender = true; // steam is a continuous loop while visible
+  }
+
+  /* glass idles gently while visible in #featured's left gutter — same
+     render-on-demand contract as animateSteam/animateBeans: a slow turntable
+     spin plus a small vertical bob so it reads as a living prop rather than a
+     static cutout planted in the margin. */
+  let glassT = 0;
+  function animateGlass(pp) {
+    if (state.glass <= 0.01) return;
+    glassT += 0.016;
+    pp.glass.rotation.y = glassT * 0.15;
+    pp.glass.position.y = pp.glassBaseY + Math.sin(glassT * 0.6) * 0.015;
+    needsRender = true; // continuous loop while the glass is visible
   }
 
   /* beans drift slowly through the story section — same render-on-demand
@@ -362,14 +524,19 @@ function adoptCupGltf(gltf, rig) {
   const cup = find("Cup");
   const saucer = find("Saucer");
   const liquid = find("Liquid");
-  const steam = ["Steam1", "Steam2", "Steam3"].map((n) => {
-    const node = find(n);
-    const mesh = firstMesh(node);
-    // GLTFLoader de-dupes identical materials across nodes, so all three
-    // Steam1-3 planes arrive sharing one material instance: without cloning,
-    // applyState's per-plane opacity gradient (0.50/0.38/0.26) just has each
-    // plane overwrite the same .opacity in turn, and every plane ends up at
-    // whatever the last one set it to.
+  const steamNodes = ["Steam1", "Steam2", "Steam3"].map(find);
+  const steamMeshes = steamNodes.map(firstMesh);
+  // GLTFLoader de-dupes identical materials across nodes, so all three
+  // Steam1-3 planes arrive sharing one material instance: without cloning,
+  // applyState's per-plane opacity gradient (0.50/0.38/0.26) just has each
+  // plane overwrite the same .opacity in turn, and every plane ends up at
+  // whatever the last one set it to. Grab the shared instance before cloning
+  // so it can be disposed exactly once afterward — once every plane holds its
+  // own clone, this original is unreferenced by any mesh but never freed on
+  // its own, leaking a Material for the life of the page.
+  const sharedSteamMaterial = steamMeshes[0].material;
+  const steam = steamNodes.map((node, i) => {
+    const mesh = steamMeshes[i];
     mesh.material = mesh.material.clone();
     mesh.material.transparent = true;
     mesh.material.depthWrite = false;
@@ -377,6 +544,7 @@ function adoptCupGltf(gltf, rig) {
     node.userData.baseY = node.position.y;
     return node; // node === mesh for every current export (single material)
   });
+  sharedSteamMaterial.dispose();
   // The baked Liquid material (Espresso) is replaced with one we own so the
   // roast lerp in applyState can drive its color; everything else (Ceramic,
   // GoldRim, SteamWisp — which carries the KTX2 alpha texture) keeps its
@@ -426,13 +594,23 @@ function adoptPropsGltf(gltf, scene, tier) {
   beans.visible = false;
   glass.visible = false;
   portafilter.visible = false; // reserved for a future story moment
-  glass.position.set(0.28, -0.1, -0.1);
+  // Was (0.28, -0.1, -0.1): that screen position sits entirely behind the
+  // opaque #featured drink-card DOM images at standard viewports (traced
+  // screen-space bbox x:1136-1438 @1440x900 — fully under card 4), so the
+  // "glass refracts in the featured section" effect was never actually
+  // visible. Moved into the section's left gutter instead: `.featured-wrapper`
+  // has `padding-left:10vw` and only holds pointer-events:none header text
+  // there, so nothing DOM-side occludes this world position while #featured
+  // is pinned. Verified via ScrollTrigger.getAll() + a screenshot at a
+  // scrollY inside the actual pin range.
+  glass.position.set(-0.34, -0.05, -0.1);
   // Glass is MeshPhysicalMaterial with transmission — captured before any
   // scale mutation so applyState's fade-in ramps toward the authored size,
   // not toward whatever scale happened to be set last.
   const glassBaseScale = glass.scale.x || 1;
+  const glassBaseY = glass.position.y;
   scene.add(beans, glass, portafilter);
-  return { beans, seeds, glass, portafilter, glassBaseScale, m, q, p, s };
+  return { beans, seeds, glass, portafilter, glassBaseScale, glassBaseY, m, q, p, s };
 }
 
 /* Frees GPU buffers for a whole subtree. Used once the placeholder cup is
