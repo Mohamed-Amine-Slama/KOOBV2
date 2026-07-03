@@ -291,10 +291,12 @@ function boot() {
   // Mobile composition: the choreography's x offsets and the 1.3 hero scale
   // were framed for a landscape frustum (half-width ≈ 0.28 at z=0); a 390px
   // portrait frame is only ≈ 0.08 wide there, which threw the trio almost
-  // entirely off-frame. Pull every x toward centre and shrink the cups so
-  // the same choreography reads on both.
-  const comFX = tier === "mobile" ? 0.3 : 1;
-  const comFS = tier === "mobile" ? 0.78 : 1;
+  // entirely off-frame. Pull every x toward centre, shrink the cups, and
+  // sink them toward the lower half (comFY) so the hero copy owns the top
+  // of a portrait screen — the same choreography then reads on both.
+  const comFX = tier === "mobile" ? 0.15 : 1;
+  const comFS = tier === "mobile" ? 0.62 : 1;
+  const comFY = tier === "mobile" ? -0.065 : 0;
 
   // hero trio: two static lidded clones stacked behind the journey cup
   // (middle front, flanks tucked behind its shoulders — the product-lineup
@@ -304,7 +306,17 @@ function boot() {
   // by the 1.3 hero cupScale, and the same 1.3 scale so all three read as
   // the same physical cup.
   const sideCupsGroup = new THREE.Group();
-  sideCupsGroup.position.set(0.194 * comFX, -0.131, 0);
+  // y = the rig's hero height (cupY -0.24 · 0.22 + comFY) plus the cup
+  // group's -0.06 offset scaled by the effective hero scale (1.3 · comFS) —
+  // the clones carry no group offset of their own, so the group supplies it.
+  // x: portrait frames centre the trio (the rig's comFX-scaled x keeps the
+  // middle cup a whisker right for the stacked look); landscape mirrors the
+  // rig's hero framing.
+  sideCupsGroup.position.set(
+    tier === "mobile" ? 0.008 : 0.194,
+    -0.24 * 0.22 + comFY - 0.078 * comFS,
+    0
+  );
   sideCupsGroup.scale.setScalar(1.3 * comFS);
   scene.add(sideCupsGroup);
   let sideCupParts = buildSideCups(cupParts);
@@ -438,7 +450,7 @@ function boot() {
   const roastColorB = new THREE.Color();
   function applyState() {
     applyPortalState();
-    rig.position.set(state.cupX * 0.22 * comFX, state.cupY * 0.22 + parallax.y, state.cupZ);
+    rig.position.set(state.cupX * 0.22 * comFX, state.cupY * 0.22 + comFY + parallax.y, state.cupZ);
     rig.rotation.set(state.cupRotX, state.cupRotY + parallax.x, 0);
     rig.scale.setScalar(state.cupScale * comFS);
     // liquid fills bottom-up: origin sits at the liquid's base. The authored

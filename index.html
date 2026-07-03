@@ -298,8 +298,13 @@
         100% { transform: scaleY(0); transform-origin: bottom; }
       }
 
-      /* hide the faked 3D while the real one is live */
-      html.has-3d .hero-cup-container,
+      /* hide the faked 3D while the real one is live. The cup container
+         must be display:none (not visibility) — the mobile layout makes it
+         position:relative, and an invisible-but-present container reserved
+         ~680px of flow, shoving the hero copy below the fold. */
+      html.has-3d .hero-cup-container {
+        display: none;
+      }
       html.has-3d .bean-field,
       html.has-3d .orbit-cup {
         visibility: hidden;
@@ -2685,11 +2690,22 @@
         .hero-title {
           text-align: center;
           margin-top: 2vh;
+          margin-bottom: 1.2rem;
         }
 
         .hero-title-logo {
           width: min(78vw, 420px);
           margin: 0 auto;
+        }
+
+        /* desktop anchors the copy left (margin-left 10vw, max-width 60vw);
+           a 390px screen needs the full width or the logo image overflows
+           its own box to the right */
+        .hero-content {
+          margin-left: 0;
+          max-width: 100%;
+          padding: 0 6vw;
+          text-align: center;
         }
 
         .hero-cup-container {
