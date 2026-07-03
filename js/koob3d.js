@@ -288,36 +288,44 @@ function boot() {
   let portalParts = null; // set when portal.glb streams in (see Promise.all below)
   rig.add(cupParts.group);
 
-  // Mobile composition: the choreography's x offsets and the 1.3 hero scale
-  // were framed for a landscape frustum (half-width ≈ 0.28 at z=0); a 390px
-  // portrait frame is only ≈ 0.08 wide there, which threw the trio almost
-  // entirely off-frame. Pull every x toward centre, shrink the cups, and
-  // sink them toward the lower half (comFY) so the hero copy owns the top
-  // of a portrait screen — the same choreography then reads on both.
-  const comFX = tier === "mobile" ? 0.15 : 1;
-  const comFS = tier === "mobile" ? 0.62 : 1;
-  const comFY = tier === "mobile" ? -0.065 : 0;
+  // Responsive composition: the choreography's x offsets and the 1.3 hero
+  // scale were framed for a landscape frustum (1440×900, half-width ≈ 0.28
+  // at z=0); a 390px portrait frame is only ≈ 0.08 wide there, which threw
+  // the trio almost entirely off-frame. The factors interpolate on the LIVE
+  // viewport aspect between two verified anchors — portrait 390×844
+  // (x 0.15, scale 0.62, sink -0.065, trio centred) and the 1.6 design
+  // frame (1, 1, 0) — and are recomputed on every resize, so dragging a
+  // window narrower or rotating a phone recomposes the cups continuously
+  // instead of freezing the load-time framing. Asset tier (GLB choice, DPR
+  // cap, bean count) intentionally stays load-time.
+  let comFX = 1, comFS = 1, comFY = 0;
+  const sideCupsGroup = new THREE.Group();
+  function updateComposition() {
+    const PORTRAIT = 390 / 844, DESIGN = 1440 / 900;
+    const s = Math.min(1, Math.max(0,
+      (innerWidth / innerHeight - PORTRAIT) / (DESIGN - PORTRAIT)));
+    comFX = 0.15 + 0.85 * s;
+    comFS = 0.62 + 0.38 * s;
+    comFY = -0.065 * (1 - s);
+    // hero trio transform mirrors the rig's hero framing: x centres in
+    // portrait and slides out to (cupX 0.88)·0.22 at the design frame;
+    // y = the rig's hero height (cupY -0.24 · 0.22 + comFY) plus the cup
+    // group's -0.06 offset scaled by the effective hero scale (1.3·comFS) —
+    // the clones carry no group offset of their own, so the group supplies
+    // it; scale matches the rig so all three read as the same physical cup.
+    sideCupsGroup.position.set(
+      0.008 + 0.186 * s,
+      -0.24 * 0.22 + comFY - 0.078 * comFS,
+      0
+    );
+    sideCupsGroup.scale.setScalar(1.3 * comFS);
+  }
+  updateComposition();
 
   // hero trio: two static lidded clones stacked behind the journey cup
   // (middle front, flanks tucked behind its shoulders — the product-lineup
   // composition). Parented to the scene (not the rig) so choreography/
-  // parallax only move the middle cup; transform mirrors the rig's hero
-  // framing: (cupX 0.88, cupY -0.24)·0.22, the cup group's own -0.06 scaled
-  // by the 1.3 hero cupScale, and the same 1.3 scale so all three read as
-  // the same physical cup.
-  const sideCupsGroup = new THREE.Group();
-  // y = the rig's hero height (cupY -0.24 · 0.22 + comFY) plus the cup
-  // group's -0.06 offset scaled by the effective hero scale (1.3 · comFS) —
-  // the clones carry no group offset of their own, so the group supplies it.
-  // x: portrait frames centre the trio (the rig's comFX-scaled x keeps the
-  // middle cup a whisker right for the stacked look); landscape mirrors the
-  // rig's hero framing.
-  sideCupsGroup.position.set(
-    tier === "mobile" ? 0.008 : 0.194,
-    -0.24 * 0.22 + comFY - 0.078 * comFS,
-    0
-  );
-  sideCupsGroup.scale.setScalar(1.3 * comFS);
+  // parallax only move the middle cup.
   scene.add(sideCupsGroup);
   let sideCupParts = buildSideCups(cupParts);
   sideCupsGroup.add(sideCupParts.group);
@@ -668,6 +676,7 @@ function boot() {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    updateComposition();
     invalidate();
   }
   window.addEventListener("resize", resize);
