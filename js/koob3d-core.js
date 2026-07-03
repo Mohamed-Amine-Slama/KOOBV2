@@ -46,7 +46,7 @@ export const CHOREOGRAPHY = [
   { id: "hero", trigger: "#hero", start: "top top", end: "bottom top",
     scrub: 1.2, to: { liquidFill: 1, steam: 1, cupRotY: 0.5, cupRotX: -0.16 } },
   { id: "story", trigger: "#story", start: "top 85%", end: "bottom 40%",
-    scrub: 1.2, to: { cupX: -1.15, cupScale: 0.55, steam: 0.25, beans: 1, roast: 0 } },
+    scrub: 1.2, to: { cupX: -1.15, cupScale: 0.55, beans: 1, roast: 0 } },
   { id: "collection", trigger: "#collection", start: "top top", end: "bottom bottom",
     scrub: 1, to: { cupX: 0, cupY: -0.1, cupScale: 1.15, cupRotY: 6.78, roast: 2, beans: 0.35 } },
   { id: "menu", trigger: "#menu", start: "top 70%", end: "top 15%",

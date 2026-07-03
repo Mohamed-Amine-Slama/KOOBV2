@@ -20,6 +20,19 @@ const root = document.documentElement;
 const GOLD_BURST_COUNT = 60;
 const GOLD_BURST_COLOR = 0xc8a96e; // KOOB palette gold
 
+// Set by boot() once its per-instance teardown() closure exists; downgrade()
+// calls through this so the render loop, listeners, and every scroll-driven
+// tween/ScrollTrigger get torn down before the legacy experience takes over —
+// otherwise they keep running forever against a canvas that's been removed
+// from the DOM. Stays null (a harmless no-op) for the renderer-creation
+// failure path in boot(), which can only happen before teardown exists —
+// and before anything teardown would need to clean up has been created.
+// Declared (and must stay) above the `if (has-3d) boot()` call below: boot()
+// runs synchronously and assigns this before control ever returns to this
+// line, so declaring it any later leaves that assignment hitting the
+// temporal dead zone.
+let currentTeardown = null;
+
 if (root.classList.contains("has-3d")) boot();
 
 // scratch object reused by animateBeans so the ticker never allocates
@@ -27,6 +40,7 @@ const beanEuler = new THREE.Euler();
 
 function downgrade(reason) {
   console.warn("[koob3d] downgrading to legacy experience:", reason);
+  if (currentTeardown) currentTeardown();
   root.classList.remove("has-3d");
   const canvas = document.getElementById("koob-3d");
   if (canvas) canvas.remove();
@@ -119,8 +133,14 @@ function boot() {
      declared together here rather than scattered through boot(). ---- */
   let tickerAttached = false; // becomes true the instant attachTicker() runs below
   let pauseTimer = null; // armed while idle; fires the hard detach after 2s
+  // Flips true once (see teardown() near the end of boot()); every re-attach
+  // path (attachTicker itself, and invalidate() which is its only caller)
+  // checks it so a downgrade() mid-session can't have some later scroll/
+  // pointermove event silently re-arm the render loop against a canvas
+  // that's already been removed from the DOM.
+  let dead = false;
   function attachTicker() {
-    if (tickerAttached) return;
+    if (dead || tickerAttached) return;
     window.gsap.ticker.add(tick);
     tickerAttached = true;
   }
@@ -149,6 +169,7 @@ function boot() {
     }
   }
   const invalidate = () => {
+    if (dead) return;
     needsRender = true;
     // Don't fight the tab-visibility suspend below: while hidden, just record
     // that a render is owed; the visibilitychange handler re-attaches (and
@@ -302,47 +323,43 @@ function boot() {
   // hidden (rAF is throttled by the browser anyway, but detaching also stops
   // gsap from bothering to call into a hidden canvas at all) and force one
   // fresh render on return in case anything invalidated silently while away.
-  document.addEventListener("visibilitychange", () => {
+  // Named (rather than inline) so teardown() below can remove it.
+  function onVisibilityChange() {
     if (document.hidden) {
       disarmHardPause();
       detachTicker();
     } else {
       invalidate();
     }
-  });
+  }
+  document.addEventListener("visibilitychange", onVisibilityChange);
 
   /* ---- choreography: every tween just mutates `state` ----
-     overwrite: "auto" fixes a real race: #hero ("top top" -> "bottom top",
-     scrollY 0-900 on a 1440x900 viewport) and #story ("top 85%" -> "bottom
-     40%", scrollY 206-1511) both write state.steam and their ranges overlap
-     for ~700px, so whichever tween's onUpdate happened to run last in a given
-     frame won the write — a visible flicker rather than a monotonic ramp.
-     A pure-data fix (narrowing #story's start so the ranges never touch)
-     would need something like "top 7%" (measured: #story's DOM top sits at
-     document y~971, so start must be <= ~8% of the viewport height to clear
-     #hero's end at 900) — far tighter than the brief's own "top 40%" example,
-     which measured out to still leaving ~290px of overlap. That's a big
-     enough shift to the trigger point that the cup/bean drift #story also
-     drives would only begin once the section is nearly fully in view,
-     instead of easing in as it arrives — a real pacing regression for a
-     one-line race fix. overwrite: "auto" instead lets GSAP hand off cleanly
-     at the moment the second tween starts actively rendering: it kills only
-     the *currently live* overlapping property on the *currently live* other
-     tween, picking up from whatever value is already on `state` (no jump).
-     Checked every other CHOREOGRAPHY pair's live pixel ranges via
-     ScrollTrigger.getAll() — #hero/#story is the only overlap in the whole
-     sequence, so applying this uniformly here doesn't change behavior
-     anywhere else (nothing else is ever both live at once). */
+     #hero ("top top" -> "bottom top") and #story ("top 85%" -> "bottom 40%")
+     used to both write state.steam over ~700px of overlapping scrollY, so
+     whichever tween's onUpdate ran last in a given frame won the write — a
+     visible flicker rather than a monotonic ramp. That's fixed at the data
+     level now (see CHOREOGRAPHY in koob3d-core.js): #story no longer touches
+     steam at all, so hero owns the only steam-writing range until menu fades
+     it out. `overwrite: "auto"` was tried here as a runtime fix instead, but
+     it's unsound for scrub tweens that live for the whole page's scroll
+     range: GSAP's auto-overwrite kills the *other* tween's conflicting
+     property tween permanently the first time both are simultaneously
+     active, not just for that frame — so scrolling back up after visiting
+     #story left hero's steam sub-tween dead and state.steam frozen instead of
+     tracking the scrubber. Every tween below is collected into `tweens` (and
+     every WAYPOINTS ScrollTrigger into `scrollTriggers`) purely for
+     teardown() — see the bottom of boot() — not for overwrite bookkeeping. */
+  const tweens = [];
   for (const c of CHOREOGRAPHY) {
     if (c.trigger === null) {
-      window.gsap.to(state, {
+      tweens.push(window.gsap.to(state, {
         ...c.to,
         duration: c.duration,
         delay: 3.2, // after the preloader venetian split
         ease: "power2.out",
-        overwrite: "auto",
         onUpdate: invalidate,
-      });
+      }));
     } else {
       // Scrub tweens ease toward their target over `c.scrub` seconds rather than
       // snapping instantly, so a tween can still be "catching up" for a moment
@@ -355,11 +372,10 @@ function boot() {
       // fastScrollEnd is GSAP's built-in fix: when the user stops after a fast
       // scroll, the scrub snaps to the resting value immediately instead of
       // continuing to ease, closing the window where two tweens' writes race.
-      window.gsap.to(state, {
+      tweens.push(window.gsap.to(state, {
         ...c.to,
         ease: "none",
         immediateRender: false,
-        overwrite: "auto",
         onUpdate: invalidate,
         scrollTrigger: {
           trigger: c.trigger,
@@ -368,30 +384,33 @@ function boot() {
           scrub: c.scrub,
           fastScrollEnd: true,
         },
-      });
+      }));
     }
   }
 
   /* ---- WAYPOINTS: one-shot effects layered on top of the scrub tweens
      above. Each entry gets its own ScrollTrigger (onEnter, not scrubbed) so
      the effect fires exactly once as the reader crosses the milestone. */
+  const scrollTriggers = [];
   for (const w of WAYPOINTS) {
     if (w.effect === "goldBurst") {
-      window.ScrollTrigger.create({
+      scrollTriggers.push(window.ScrollTrigger.create({
         trigger: w.trigger,
         start: w.start,
         onEnter: () => triggerGoldBurst(goldBurst, invalidate),
-      });
+      }));
     }
   }
 
-  /* mouse parallax (desktop only), ±0.03 rad / ±0.01 units */
+  /* mouse parallax (desktop only), ±0.03 rad / ±0.01 units. Named (rather
+     than inline) so teardown() below can remove it. */
+  function onPointerMove(e) {
+    parallax.x = (e.clientX / innerWidth - 0.5) * -0.06;
+    parallax.y = (e.clientY / innerHeight - 0.5) * -0.02;
+    invalidate();
+  }
   if (tier === "desktop") {
-    window.addEventListener("pointermove", (e) => {
-      parallax.x = (e.clientX / innerWidth - 0.5) * -0.06;
-      parallax.y = (e.clientY / innerHeight - 0.5) * -0.02;
-      invalidate();
-    });
+    window.addEventListener("pointermove", onPointerMove);
   }
 
   function resize() {
@@ -408,6 +427,27 @@ function boot() {
     e.preventDefault();
     downgrade("WebGL context lost");
   });
+
+  /* ---- full teardown, run once by downgrade() before it restores the
+     legacy experience: without this, the ticker machinery, the three
+     listeners above, and every scroll-driven tween/ScrollTrigger created in
+     this boot() call would keep running forever (and re-arm the render loop
+     via invalidate()) against a canvas that's already been removed from the
+     DOM. `dead` (checked by attachTicker/invalidate) makes every one of those
+     re-arm paths a no-op from this point on. */
+  function teardown() {
+    if (dead) return;
+    dead = true;
+    disarmHardPause();
+    detachTicker();
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("resize", resize);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+    tweens.forEach((t) => t.kill());
+    scrollTriggers.forEach((st) => st.kill());
+  }
+  currentTeardown = teardown;
+  window.__koob3d.forceDowngrade = () => downgrade("debug");
 
   let steamT = 0;
   function animateSteam(steam) {
