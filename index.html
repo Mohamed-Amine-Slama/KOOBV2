@@ -22,7 +22,8 @@
           var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
           var c = document.createElement("canvas");
           var gl = c.getContext("webgl2") || c.getContext("webgl");
-          if (gl && !reduced) document.documentElement.classList.add("has-3d");
+          if (gl && !reduced && !/[?&]no3d/.test(location.search))
+            document.documentElement.classList.add("has-3d");
         } catch (e) {}
       })();
     </script>
@@ -214,6 +215,83 @@
       html.has-3d #koob-3d {
         display: block;
       }
+
+      /* ===== portal entry (3D only): #portal-entry is a pure scroll runway
+         at the top of the page; all visuals live on these fixed layers plus
+         the canvas. koob3d.js scrubs state.portalT over the runway, flying
+         the camera through the portal GLB — the .portal-active class (added
+         at boot, removed once through the arch at portalT ≥ 0.97) raises the
+         canvas above the veil for the duration of the fly-through. Legacy /
+         reduced-motion visitors never see any of this: everything here is
+         display-gated on html.has-3d. ===== */
+      #portal-entry,
+      #portal-veil,
+      #portal-flash {
+        display: none;
+      }
+      html.has-3d #portal-entry {
+        display: block;
+        height: 260vh;
+      }
+      /* the dark void around the portal while approaching: above the page
+         sections (z 2), below the raised canvas (z 10), so only the portal
+         render shows until the veil lifts just before the crossing */
+      html.has-3d.portal-active #portal-veil {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 9;
+        background: #05100d;
+        pointer-events: none;
+        opacity: 1; /* no CSS transition — koob3d.js drives inline opacity per frame */
+      }
+      html.has-3d.portal-active #koob-3d {
+        z-index: 10;
+      }
+      /* cyan gaussian pop as the camera pierces the arch plane */
+      html.has-3d.portal-active #portal-flash {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 11;
+        background: radial-gradient(
+          circle at 50% 45%,
+          rgba(200, 255, 242, 0.95) 0%,
+          rgba(93, 224, 202, 0.5) 38%,
+          rgba(93, 224, 202, 0) 70%
+        );
+        mix-blend-mode: screen;
+        pointer-events: none;
+        opacity: 0; /* koob3d.js drives inline opacity per frame */
+      }
+      .portal-hint {
+        position: absolute;
+        left: 50%;
+        bottom: 8vh;
+        transform: translateX(-50%);
+        color: var(--koob-gold);
+        font-size: 0.72rem;
+        letter-spacing: 0.42em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        text-align: center;
+      }
+      .portal-hint::after {
+        content: "";
+        display: block;
+        width: 1px;
+        height: 34px;
+        margin: 14px auto 0;
+        background: linear-gradient(to bottom, var(--koob-gold), transparent);
+        animation: portal-hint-drop 1.8s ease-in-out infinite;
+      }
+      @keyframes portal-hint-drop {
+        0% { transform: scaleY(0); transform-origin: top; }
+        45% { transform: scaleY(1); transform-origin: top; }
+        55% { transform: scaleY(1); transform-origin: bottom; }
+        100% { transform: scaleY(0); transform-origin: bottom; }
+      }
+
       /* hide the faked 3D while the real one is live */
       html.has-3d .hero-cup-container,
       html.has-3d .bean-field,
@@ -3119,6 +3197,11 @@
 
   <body>
     <canvas id="koob-3d" aria-hidden="true"></canvas>
+    <!-- portal-entry fixed layers (3D only — see the portal CSS block) -->
+    <div id="portal-veil" aria-hidden="true">
+      <div class="portal-hint">Scroll to step inside</div>
+    </div>
+    <div id="portal-flash" aria-hidden="true"></div>
     <div class="cursor-aura" aria-hidden="true"></div>
     <div class="custom-cursor"></div>
 
@@ -3238,6 +3321,11 @@
           <div class="preloader-slat"></div>
         </div>
       </div>
+
+      <!-- portal entry: 3D-only scroll runway; koob3d.js flies the camera
+           through the portal GLB over these 260vh (collapses to nothing
+           without html.has-3d) -->
+      <section id="portal-entry" aria-hidden="true"></section>
 
       <section id="hero">
         <div class="god-rays" aria-hidden="true"></div>
@@ -4947,6 +5035,28 @@
           const color = gsap.utils.interpolate(
             "#0d3b2e",
             "#e8dcc8",
+            self.progress
+          );
+          document.body.style.backgroundColor = color;
+        },
+      });
+
+      /* Sweep the body back to the void as "The KOOB Standard" arrives. The
+         menu trigger above leaves the body cream for the rest of the page,
+         which was invisible in the legacy experience (every later section has
+         an opaque background) — but html.has-3d makes #features transparent
+         so the 3D cup can show through, and a cream body behind that
+         section's cream text erases it. Scrubbed both ways, so backing up
+         into #featured restores the cream it expects. */
+      ScrollTrigger.create({
+        trigger: "#features",
+        start: "top 85%",
+        end: "top 15%",
+        scrub: true,
+        onUpdate: (self) => {
+          const color = gsap.utils.interpolate(
+            "#e8dcc8",
+            "#040d08",
             self.progress
           );
           document.body.style.backgroundColor = color;

@@ -39,6 +39,7 @@ test("modelUrls: builds tiered paths and rejects junk", () => {
   assert.deepEqual(modelUrls("mobile"), {
     cup: "assets/models/cup-mobile.glb",
     props: "assets/models/props-mobile.glb",
+    portal: "assets/models/portal.glb",
   });
   assert.throws(() => modelUrls("tablet"));
 });
@@ -46,9 +47,10 @@ test("modelUrls: builds tiered paths and rejects junk", () => {
 const STATE_KEYS = [
   "cupX", "cupY", "cupZ", "cupRotX", "cupRotY", "cupScale",
   "liquidFill", "steam", "roast", "beans", "glass", "sceneOpacity",
+  "portalT",
 ];
 const SECTION_IDS = [
-  "#hero", "#story", "#collection", "#menu",
+  "#portal-entry", "#hero", "#story", "#collection", "#menu",
   "#featured", "#features", "#quiz",
 ];
 
@@ -75,7 +77,7 @@ test("CHOREOGRAPHY: unique ids, real section triggers, known keys", () => {
 
 test("CHOREOGRAPHY: normalized channels stay in [0,1], roast in range", () => {
   for (const c of CHOREOGRAPHY) {
-    for (const k of ["liquidFill", "steam", "beans", "glass", "sceneOpacity"]) {
+    for (const k of ["liquidFill", "steam", "beans", "glass", "sceneOpacity", "portalT"]) {
       if (k in c.to) assert.ok(c.to[k] >= 0 && c.to[k] <= 1, `${c.id}.${k}`);
     }
     if ("roast" in c.to) {

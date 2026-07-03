@@ -20,6 +20,19 @@ const root = document.documentElement;
 const GOLD_BURST_COUNT = 60;
 const GOLD_BURST_COLOR = 0xc8a96e; // KOOB palette gold
 
+/* Portal entry constants. The camera dollies from FAR_Z to NEAR_Z as
+   state.portalT scrubs 0→1 through #portal-entry; the portal arch plane sits
+   at PORTAL_Z between them, so the camera physically crosses it (at
+   portalT ≈ 0.9 given the dolly's pow-1.35 easing). NEAR_Z is the cup
+   journey's long-standing fixed camera position — the fly-through lands
+   exactly where every later choreography frame expects the camera to be. */
+const PORTAL_CAM_FAR_Z = 3.4;
+const PORTAL_CAM_NEAR_Z = 0.55;
+const PORTAL_Z = 0.85;
+const PORTAL_SCALE = 0.3; // GLB is authored at real size (2.57m tall)
+// arch centerline is 1.3m up in the GLB; place it dead ahead of the camera
+const PORTAL_Y = 0.22 - 1.3 * PORTAL_SCALE;
+
 // Set by boot() once its per-instance teardown() closure exists; downgrade()
 // calls through this so the render loop, listeners, and every scroll-driven
 // tween/ScrollTrigger get torn down before the legacy experience takes over —
@@ -42,8 +55,13 @@ function downgrade(reason) {
   console.warn("[koob3d] downgrading to legacy experience:", reason);
   if (currentTeardown) currentTeardown();
   root.classList.remove("has-3d");
+  root.classList.remove("portal-active");
   const canvas = document.getElementById("koob-3d");
   if (canvas) canvas.remove();
+  // removing has-3d collapses #portal-entry (display:none → its 260vh of
+  // document height is gone), so every ScrollTrigger built against the old
+  // layout — including the DOM-only ones created in index.html — is stale
+  if (window.ScrollTrigger) window.ScrollTrigger.refresh();
   const video = document.querySelector(".hero-fill-video");
   if (video) {
     video.muted = true;
@@ -80,10 +98,14 @@ function boot() {
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 20);
-  camera.position.set(0, 0.22, 0.55);
-  // downward tilt toward the cup's rest height so the open rim (and the
-  // liquid filling inside it) reads on screen instead of being viewed edge-on
-  camera.lookAt(0, -0.05, 0);
+  // Start of the portal approach (state.portalT = 0). applyPortalState()
+  // re-derives position + gaze from state.portalT on every applied frame:
+  // portalT 1 lands exactly on the cup journey's fixed vantage — position
+  // (0, 0.22, 0.55) with the downward tilt to lookAt(0, -0.05, 0) so the open
+  // cup rim (and the liquid filling inside it) reads on screen instead of
+  // being viewed edge-on.
+  camera.position.set(0, 0.22, PORTAL_CAM_FAR_Z);
+  camera.lookAt(0, 0.22, 0);
 
   // Neutral studio IBL: without it the Glass transmission material has
   // nothing to refract (reads as a flat gray blob) and the GoldRim/ceramic
@@ -127,6 +149,16 @@ function boot() {
   const state = { ...INITIAL_STATE };
   const parallax = { x: 0, y: 0 };
   let needsRender = true;
+
+  /* ---- portal entry DOM layers (all display-gated on html.has-3d in CSS,
+     so none of this exists for legacy users). portal-active additionally
+     raises the canvas above the veil for the fly-through, then comes off at
+     portalT ≥ 0.97 to restore normal stacking for the cup journey. Added here
+     (not in static markup) so a non-3D load never shows the veil at all. ---- */
+  const portalVeil = document.getElementById("portal-veil");
+  const portalFlash = document.getElementById("portal-flash");
+  const portalHint = portalVeil ? portalVeil.querySelector(".portal-hint") : null;
+  root.classList.add("portal-active");
 
   /* ---- render-loop discipline: hard pause, tab-visibility suspend, and an
      adaptive DPR drop all hang off the same `tick` function, so they're
@@ -196,6 +228,7 @@ function boot() {
   scene.add(rig);
   let cupParts = buildPlaceholderCup();
   let propParts = null;
+  let portalParts = null; // set when portal.glb streams in (see Promise.all below)
   rig.add(cupParts.group);
 
   // gold particle burst: parked invisible at the cup rim, fired once per
@@ -213,14 +246,19 @@ function boot() {
     .detectSupport(renderer);
   const loader = new GLTFLoader().setDRACOLoader(draco).setKTX2Loader(ktx2);
 
-  Promise.all([loader.loadAsync(urls.cup), loader.loadAsync(urls.props)])
-    .then(([cupGltf, propsGltf]) => {
+  Promise.all([
+    loader.loadAsync(urls.cup),
+    loader.loadAsync(urls.props),
+    loader.loadAsync(urls.portal),
+  ])
+    .then(([cupGltf, propsGltf, portalGltf]) => {
       const oldPlaceholder = cupParts.group;
       rig.remove(oldPlaceholder);
       disposeObject3D(oldPlaceholder); // placeholder is discarded for good — free its GPU buffers
       cupParts = adoptCupGltf(cupGltf, rig);
       propParts = adoptPropsGltf(propsGltf, scene, tier);
-      window.__koob3d.assets = { cup: urls.cup, props: urls.props };
+      portalParts = adoptPortalGltf(portalGltf, scene);
+      window.__koob3d.assets = { cup: urls.cup, props: urls.props, portal: urls.portal };
 
       // Recompute the gold-burst rim anchor from the real cup now that it's
       // loaded — the placeholder-era estimate (rimRadius 0.037/rimY 0.036 in
@@ -249,10 +287,54 @@ function boot() {
     })
     .catch((err) => downgrade(err));
 
+  /* ---- portal entry: everything derives from the one portalT scalar so the
+     scrub is fully reversible — scroll back up and the mist re-forms, the
+     veil returns, the camera backs out through the arch. ---- */
+  function applyPortalState() {
+    const t = state.portalT;
+    // dolly with pow easing: velocity builds as the portal nears, so crossing
+    // the arch reads as "stepping through" rather than a constant conveyor
+    const dolly = Math.pow(t, 1.35);
+    // slight camera sway from the pointer during the approach only (the cup
+    // journey already gets its parallax via the rig); fades out by portalT 1
+    camera.position.set(
+      parallax.x * -1.2 * (1 - t),
+      0.22,
+      PORTAL_CAM_FAR_Z + (PORTAL_CAM_NEAR_Z - PORTAL_CAM_FAR_Z) * dolly
+    );
+    // gaze holds the arch center, then settles down onto the cup in the last
+    // 30% — ending exactly at the cup journey's lookAt(0, -0.05, 0)
+    camera.lookAt(0, 0.22 - 0.27 * smooth01((t - 0.7) / 0.3), 0);
+    if (portalParts) {
+      const brighten = smooth01((t - 0.4) / 0.3); // mist flares as you close in
+      // burns off completely by t=0.8 — before the veil lifts and the flash
+      // pops — so the through-the-arch glimpse is clean, not washed gray by
+      // a lingering high-emissive film
+      const dissolve = smooth01((t - 0.5) / 0.3);
+      const mat = portalParts.mist.material;
+      mat.emissiveIntensity = portalParts.baseMistIntensity * (1 + 1.8 * brighten);
+      mat.opacity = 1 - dissolve;
+      portalParts.mist.visible = mat.opacity > 0.02;
+      portalParts.glow.intensity = portalParts.baseGlow * (1 - 0.6 * t);
+    }
+    // DOM layers: the dark void hiding the page lifts just before the
+    // crossing; a cyan gaussian flash pops exactly as the camera pierces the
+    // arch plane (t≈0.9). Inline styles per frame, same contract as the
+    // canvas opacity below.
+    if (portalVeil) portalVeil.style.opacity = String(1 - smooth01((t - 0.8) / 0.17));
+    if (portalHint) portalHint.style.opacity = String(1 - smooth01(t / 0.12));
+    if (portalFlash) {
+      const x = (t - 0.9) / 0.05;
+      portalFlash.style.opacity = String(Math.exp(-x * x) * 0.85);
+    }
+    root.classList.toggle("portal-active", t < 0.97);
+  }
+
   /* ---- state → scene, executed only when something changed ---- */
   const roastColorA = new THREE.Color();
   const roastColorB = new THREE.Color();
   function applyState() {
+    applyPortalState();
     rig.position.set(state.cupX * 0.22, state.cupY * 0.22 + parallax.y, state.cupZ);
     rig.rotation.set(state.cupRotX, state.cupRotY + parallax.x, 0);
     rig.scale.setScalar(state.cupScale);
@@ -651,6 +733,65 @@ function adoptPropsGltf(gltf, scene, tier) {
   const glassBaseY = glass.position.y;
   scene.add(beans, glass, portafilter);
   return { beans, seeds, glass, portafilter, glassBaseScale, glassBaseY, m, q, p, s };
+}
+
+/* clamped smoothstep over [0,1] — the shaping function behind every
+   portal-entry ramp (mist dissolve, veil lift, gaze settle) */
+function smooth01(x) {
+  const t = Math.min(Math.max(x, 0), 1);
+  return t * t * (3 - 2 * t);
+}
+
+/* Binds the loaded portal GLB (PortalFrame/PortalGlass/PortalNeon/PortalSill,
+   authored at real scale — 2.57m tall — in assets/models/src/koob-scene.blend)
+   and stations it on the camera's approach path: arch centerline dead ahead
+   at the cup journey's eye height, arch plane at PORTAL_Z so the fly-through
+   physically crosses it. Also adds the glow the GLB can't carry itself:
+   there's no postprocessing bloom in this pipeline, so two additive shells
+   fan the neon band out into a halo, and a cyan point light kisses the
+   bronze frame (emissive materials don't illuminate neighbors). */
+function adoptPortalGltf(gltf, scene) {
+  const g = gltf.scene;
+  const find = (n) => {
+    const o = g.getObjectByName(n);
+    if (!o) throw new Error(`portal GLB missing object ${n}`);
+    return o;
+  };
+  const mist = firstMesh(find("PortalGlass"));
+  const neon = firstMesh(find("PortalNeon"));
+  // the mist dissolves mid-journey (applyPortalState drives opacity);
+  // depthWrite off keeps the fade free of self-sorting artifacts
+  mist.material.transparent = true;
+  mist.material.depthWrite = false;
+  // 4.0, from KHR_materials_emissive_strength — the dissolve brightens from here
+  const baseMistIntensity = mist.material.emissiveIntensity;
+  const shells = [
+    [1.04, 0.2],
+    [1.085, 0.09],
+  ].map(([s, opacity]) => {
+    const shell = new THREE.Mesh(
+      neon.geometry,
+      new THREE.MeshBasicMaterial({
+        color: 0x55ead0,
+        transparent: true,
+        opacity,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    // the neon band is authored portal-local about the origin, so scaling a
+    // clone about that same origin fans it outward into a soft halo layer
+    shell.scale.setScalar(s);
+    g.add(shell);
+    return shell;
+  });
+  const glow = new THREE.PointLight(0x66f0d8, 1.2, 1.5, 2);
+  glow.position.set(0, 1.55, 0.3); // portal-local: upper arch, just in front
+  g.add(glow);
+  g.scale.setScalar(PORTAL_SCALE);
+  g.position.set(0, PORTAL_Y, PORTAL_Z);
+  scene.add(g);
+  return { group: g, mist, neon, shells, glow, baseMistIntensity, baseGlow: glow.intensity };
 }
 
 /* Frees GPU buffers for a whole subtree. Used once the placeholder cup is
