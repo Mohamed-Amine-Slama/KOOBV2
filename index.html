@@ -1877,15 +1877,162 @@
       }
 
       #hero {
+        --hero-inset: clamp(16px, 2.4vw, 30px);
+        --hero-rail-x: clamp(20px, 2.6vw, 40px);
         min-height: 100vh;
         width: 100%;
         background-color: #275c59;
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         justify-content: flex-start;
-        padding-top: 20vh;
         position: relative;
         overflow: hidden;
+      }
+
+      /* ============ Hero façade: hairline threshold frame + rails ============
+         The gold-lined doorway from KOOB's real entrance, drawn as structure:
+         a 1px inset frame carries the wayfinding (top rail) and the brand
+         creed (bottom rail); corner ticks reuse the bracket vocabulary from
+         the story card and the Find Us map. */
+      .hero-frame {
+        position: absolute;
+        inset: var(--hero-inset);
+        border: 1px solid rgba(200, 169, 110, 0.16);
+        pointer-events: none;
+        z-index: 3;
+        opacity: 0;
+      }
+
+      .hero-frame span {
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        border-color: rgba(200, 169, 110, 0.55);
+        border-style: solid;
+        border-width: 0;
+      }
+
+      .hero-frame .tick-tl {
+        top: -1px;
+        left: -1px;
+        border-top-width: 2px;
+        border-left-width: 2px;
+      }
+
+      .hero-frame .tick-tr {
+        top: -1px;
+        right: -1px;
+        border-top-width: 2px;
+        border-right-width: 2px;
+      }
+
+      .hero-frame .tick-bl {
+        bottom: -1px;
+        left: -1px;
+        border-bottom-width: 2px;
+        border-left-width: 2px;
+      }
+
+      .hero-frame .tick-br {
+        bottom: -1px;
+        right: -1px;
+        border-bottom-width: 2px;
+        border-right-width: 2px;
+      }
+
+      .hero-topbar {
+        position: absolute;
+        top: var(--hero-inset);
+        left: var(--hero-inset);
+        right: var(--hero-inset);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: clamp(18px, 2.4vh, 28px) var(--hero-rail-x);
+        z-index: 4;
+        opacity: 0;
+      }
+
+      .hero-brand {
+        display: flex;
+        align-items: baseline;
+        gap: 0.65rem;
+        font-family: var(--font-serif);
+        font-weight: 900;
+        font-size: 1.3rem;
+        letter-spacing: 0.16em;
+        color: var(--koob-cream);
+        text-decoration: none;
+      }
+
+      .hero-brand-ar {
+        font-size: 1.05rem;
+        font-weight: 400;
+        color: var(--koob-gold);
+      }
+
+      .hero-nav {
+        display: flex;
+        align-items: center;
+        gap: clamp(1.3rem, 2.6vw, 2.6rem);
+      }
+
+      .hero-nav-link {
+        position: relative;
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: rgba(245, 240, 232, 0.8);
+        text-decoration: none;
+        padding-bottom: 4px;
+        transition: color 0.3s ease;
+      }
+
+      .hero-nav-link::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        height: 1px;
+        background: var(--koob-gold);
+        transform: scaleX(0);
+        transform-origin: left center;
+        transition: transform 0.35s ease;
+      }
+
+      .hero-nav-link:hover,
+      .hero-nav-link:focus-visible {
+        color: var(--koob-gold);
+      }
+
+      .hero-nav-link:hover::after,
+      .hero-nav-link:focus-visible::after {
+        transform: scaleX(1);
+      }
+
+      .hero-baseline {
+        position: absolute;
+        left: var(--hero-inset);
+        right: var(--hero-inset);
+        bottom: var(--hero-inset);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: clamp(16px, 2.2vh, 24px) var(--hero-rail-x);
+        z-index: 3;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .hero-baseline-item {
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: rgba(245, 240, 232, 0.68);
+        margin: 0;
       }
 
       .hero-glow {
@@ -2160,40 +2307,142 @@
       }
 
       .hero-content {
-        margin-left: 10vw;
+        margin-left: calc(var(--hero-inset) + clamp(24px, 3.4vw, 52px));
         z-index: 3;
-        max-width: 60vw;
+        max-width: 52vw;
+      }
+
+      .hero-eyebrow {
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+        font-family: var(--font-mono);
+        font-size: 0.66rem;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        color: var(--koob-gold);
+        margin: 0 0 clamp(1.2rem, 2.6vh, 2rem);
+        opacity: 0;
+      }
+
+      .hero-eyebrow-rule {
+        flex: none;
+        width: 44px;
+        height: 1px;
+        background: linear-gradient(
+          to right,
+          var(--koob-gold),
+          rgba(200, 169, 110, 0.1)
+        );
       }
 
       .hero-title {
-        margin-bottom: 2rem;
+        margin-bottom: clamp(1.2rem, 2.6vh, 1.8rem);
         transform-origin: left center;
       }
 
       .hero-title-logo {
         display: block;
-        width: clamp(300px, 38vw, 620px);
+        width: clamp(280px, 34vw, 560px);
         height: auto;
       }
 
       .hero-subtext {
-        margin-bottom: 3rem;
+        margin-bottom: clamp(1.8rem, 3.4vh, 2.6rem);
         opacity: 0;
       }
 
       .sub-line-1 {
         font-family: var(--font-sub);
         font-style: italic;
-        font-size: 1.5rem;
-        opacity: 0.65;
+        font-size: 1.65rem;
+        color: rgba(245, 240, 232, 0.88);
         letter-spacing: 0.08em;
+        margin: 0;
       }
 
-      .sub-line-2 {
+      .hero-lede {
+        font-family: var(--font-body);
+        font-weight: 300;
+        font-size: 1.02rem;
+        line-height: 1.75;
+        color: rgba(245, 240, 232, 0.62);
+        max-width: 44ch;
+        margin: 1rem 0 0;
+      }
+
+      .hero-actions {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: clamp(1.4rem, 2.4vw, 2.4rem);
+      }
+
+      .hero-link {
         font-family: var(--font-mono);
-        font-size: 0.7rem;
+        font-size: 0.72rem;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: rgba(245, 240, 232, 0.75);
+        text-decoration: none;
+        opacity: 0;
+        transition: color 0.3s ease;
+      }
+
+      .hero-link .hero-link-arrow {
+        display: inline-block;
+        margin-left: 0.45rem;
         color: var(--koob-gold);
-        margin-top: 0.5rem;
+        transition: transform 0.3s ease;
+      }
+
+      .hero-link:hover,
+      .hero-link:focus-visible {
+        color: var(--koob-gold);
+      }
+
+      .hero-link:hover .hero-link-arrow,
+      .hero-link:focus-visible .hero-link-arrow {
+        transform: translateY(4px);
+      }
+
+      /* short landscape viewports (split screens, laptops with devtools):
+         the flex centering must happen between the rails, not the viewport
+         edges, and the logo/rhythm compress so nothing can collide */
+      @media (min-width: 769px) and (max-height: 720px) {
+        #hero {
+          padding-top: 108px;
+          padding-bottom: 84px;
+        }
+
+        .hero-title-logo {
+          width: clamp(200px, 22vw, 340px);
+        }
+
+        .hero-eyebrow {
+          margin-bottom: 0.8rem;
+        }
+
+        .hero-title {
+          margin-bottom: 0.9rem;
+        }
+
+        .sub-line-1 {
+          font-size: 1.35rem;
+        }
+
+        .hero-subtext {
+          margin-bottom: 1.3rem;
+        }
+
+        .hero-lede {
+          font-size: 0.9rem;
+          line-height: 1.6;
+        }
+
+        .cta-button {
+          padding: 0.8rem 1.6rem;
+        }
       }
 
       .cta-button {
@@ -2682,9 +2931,47 @@
 
       @media (max-width: 768px) {
         #hero {
-          padding-top: 15vh;
+          --hero-inset: 12px;
+          --hero-rail-x: 14px;
+          padding-top: 13vh;
           flex-direction: column;
           align-items: center;
+        }
+
+        .hero-topbar {
+          padding-top: 14px;
+          padding-bottom: 14px;
+        }
+
+        .hero-brand {
+          font-size: 1.05rem;
+          letter-spacing: 0.12em;
+        }
+
+        .hero-nav {
+          gap: 1rem;
+        }
+
+        .hero-nav-link {
+          font-size: 0.58rem;
+          letter-spacing: 0.16em;
+        }
+
+        /* the cups own the lower half of a portrait hero — the creed rail
+           would sit on top of them, so it stays desktop-only */
+        .hero-baseline {
+          display: none;
+        }
+
+        .hero-eyebrow {
+          justify-content: center;
+          font-size: 0.6rem;
+          letter-spacing: 0.24em;
+          margin-bottom: 1rem;
+        }
+
+        .hero-eyebrow-rule {
+          display: none;
         }
 
         .hero-title {
@@ -2694,8 +2981,26 @@
         }
 
         .hero-title-logo {
-          width: min(78vw, 420px);
+          width: min(66vw, 360px);
           margin: 0 auto;
+        }
+
+        .sub-line-1 {
+          font-size: 1.3rem;
+        }
+
+        .hero-lede {
+          font-size: 0.88rem;
+          line-height: 1.65;
+          max-width: 36ch;
+          margin-left: auto;
+          margin-right: auto;
+          margin-top: 0.8rem;
+        }
+
+        .hero-actions {
+          justify-content: center;
+          gap: 1.2rem;
         }
 
         /* desktop anchors the copy left (margin-left 10vw, max-width 60vw);
@@ -2733,7 +3038,7 @@
         }
 
         .hero-subtext {
-          margin: 2rem auto;
+          margin: 1.4rem auto 1.6rem;
           max-width: 90%;
         }
 
@@ -3180,6 +3485,11 @@
         .story-panel,
         .collection-slide,
         .hero-subtext,
+        .hero-eyebrow,
+        .hero-frame,
+        .hero-topbar,
+        .hero-baseline,
+        .hero-link,
         .menu-category {
           opacity: 1 !important;
           transform: none !important;
@@ -3321,6 +3631,24 @@
         <div class="hero-glow hero-glow-gold" aria-hidden="true"></div>
         <canvas class="bean-field" aria-hidden="true"></canvas>
 
+        <div class="hero-frame" aria-hidden="true">
+          <span class="tick-tl"></span>
+          <span class="tick-tr"></span>
+          <span class="tick-bl"></span>
+          <span class="tick-br"></span>
+        </div>
+
+        <header class="hero-topbar">
+          <a href="#hero" class="hero-brand interactive"
+            >KOOB <span class="hero-brand-ar">كوب</span></a
+          >
+          <nav class="hero-nav" aria-label="Page sections">
+            <a href="#story" class="hero-nav-link interactive">Story</a>
+            <a href="#menu" class="hero-nav-link interactive">Menu</a>
+            <a href="#findus" class="hero-nav-link interactive">Find Us</a>
+          </nav>
+        </header>
+
         <div class="hero-cup-container">
           <video
             class="hero-fill-video"
@@ -3339,6 +3667,11 @@
         </div>
 
         <div class="hero-content">
+          <p class="hero-eyebrow">
+            <span class="hero-eyebrow-rule" aria-hidden="true"></span>
+            Specialty coffee &middot; Jawhra &mdash; Sousse
+          </p>
+
           <h1 class="hero-title">
             <img
               class="hero-title-logo"
@@ -3348,14 +3681,28 @@
           </h1>
 
           <div class="hero-subtext">
-            <div class="sub-line-1">You are where you need to be.</div>
-            <div class="sub-line-2">
-              Jawhra &middot; Sousse &middot; Tunisia
-            </div>
+            <p class="sub-line-1">You are where you need to be.</p>
+            <p class="hero-lede">
+              Where the ritual of coffee meets the warmth of Tunisian culture
+              &mdash; a sanctuary founded by Amir Ghzel in the heart of
+              Jawhra.
+            </p>
           </div>
 
-          <a href="#menu" class="cta-button interactive">Explore The Menu</a>
+          <div class="hero-actions">
+            <a href="#menu" class="cta-button interactive">Explore The Menu</a>
+            <a href="#story" class="hero-link interactive"
+              >Our story <span class="hero-link-arrow" aria-hidden="true"
+                >&darr;</span
+              ></a
+            >
+          </div>
         </div>
+
+        <footer class="hero-baseline">
+          <p class="hero-baseline-item">Founded by Amir Ghzel</p>
+          <p class="hero-baseline-item">Happiness is one drink away</p>
+        </footer>
 
         <div class="scroll-indicator">
           <svg viewBox="0 0 100 100" class="scroll-ring">
@@ -4391,6 +4738,11 @@
               ".hero-title-logo",
               ".hero-cup-container",
               ".hero-subtext",
+              ".hero-eyebrow",
+              ".hero-frame",
+              ".hero-topbar",
+              ".hero-baseline",
+              ".hero-link",
               ".cta-button",
               ".breadcrumb-bar",
               ".scroll-indicator",
@@ -4485,6 +4837,19 @@
           )
           .to("#preloader", { display: "none", duration: 0 }, 4.0)
 
+          .to(".hero-frame", { opacity: 1, duration: 1.2, ease: "power2.out" }, 3.6)
+          .fromTo(
+            ".hero-topbar",
+            { y: -18 },
+            { y: 0, opacity: 1, duration: 0.8, ease: "power3.out" },
+            3.7
+          )
+          .fromTo(
+            ".hero-eyebrow",
+            { y: 14 },
+            { y: 0, opacity: 1, duration: 0.7, ease: "power3.out" },
+            3.55
+          )
           .from(
             ".hero-title-logo",
             {
@@ -4512,6 +4877,8 @@
             },
             4.4
           )
+          .to(".hero-link", { opacity: 1, duration: 0.6 }, 4.55)
+          .to(".hero-baseline", { opacity: 1, duration: 0.6 }, 4.5)
           .to(".breadcrumb-bar", { opacity: 1, duration: 0.5 }, 4.5)
           .to(
             ".scroll-indicator",
@@ -4618,6 +4985,9 @@
           })
           .to(content, { opacity: 0, y: -90, ease: "power1.in", duration: 1 }, 0)
           .to(scrollInd, { opacity: 0, duration: 0.25 }, 0)
+          .to(".hero-topbar", { opacity: 0, y: -26, ease: "power1.in", duration: 0.6 }, 0)
+          .to(".hero-baseline", { opacity: 0, ease: "power1.in", duration: 0.5 }, 0)
+          .to(".hero-frame", { opacity: 0, ease: "power1.in", duration: 0.7 }, 0)
           .to(".hero-glow, .hero-glow-gold", { opacity: 0.18, duration: 1 }, 0)
           .to(container, { opacity: 0, scale: 1.05, ease: "power1.in", duration: 0.75 }, 0.2);
       })();

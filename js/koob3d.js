@@ -293,12 +293,21 @@ function boot() {
   // at z=0); a 390px portrait frame is only ≈ 0.08 wide there, which threw
   // the trio almost entirely off-frame. The factors interpolate on the LIVE
   // viewport aspect between two verified anchors — portrait 390×844
-  // (x 0.15, scale 0.62, sink -0.065, trio centred) and the 1.6 design
-  // frame (1, 1, 0) — and are recomputed on every resize, so dragging a
-  // window narrower or rotating a phone recomposes the cups continuously
-  // instead of freezing the load-time framing. Asset tier (GLB choice, DPR
-  // cap, bean count) intentionally stays load-time.
-  let comFX = 1, comFS = 1, comFY = 0;
+  // (x 0.15, scale 0.62, sink -0.065) and the 1.6 design frame (1, 1, 0) —
+  // and are recomputed on every resize, so dragging a window narrower or
+  // rotating a phone recomposes the cups continuously instead of freezing
+  // the load-time framing. Asset tier (GLB choice, DPR cap, bean count)
+  // intentionally stays load-time.
+  //
+  // comFYHero/comFSHero are a second, HERO-ONLY portrait adjustment on top:
+  // the hero copy block (eyebrow/logo/tagline/lede/CTAs) owns the top half
+  // of a portrait frame, so the trio sinks to the bottom half (total -0.15)
+  // and shrinks (effective 0.55) while it's on screen. They're blended by
+  // state.sideCups in applyState — exactly 1 for the hero composition, and
+  // scrubbed to 0 as #story arrives — so the later sections (collection,
+  // features) keep the original verified framing instead of inheriting a
+  // sink that would push the journey cup off the bottom of the frustum.
+  let comFX = 1, comFS = 1, comFY = 0, comFYHero = 0, comFSHero = 1;
   const sideCupsGroup = new THREE.Group();
   function updateComposition() {
     const PORTRAIT = 390 / 844, DESIGN = 1440 / 900;
@@ -307,18 +316,22 @@ function boot() {
     comFX = 0.15 + 0.85 * s;
     comFS = 0.62 + 0.38 * s;
     comFY = -0.065 * (1 - s);
+    comFYHero = -0.085 * (1 - s);
+    comFSHero = (0.55 + 0.45 * s) / comFS;
     // hero trio transform mirrors the rig's hero framing: x centres in
     // portrait and slides out to (cupX 0.88)·0.22 at the design frame;
-    // y = the rig's hero height (cupY -0.24 · 0.22 + comFY) plus the cup
-    // group's -0.06 offset scaled by the effective hero scale (1.3·comFS) —
-    // the clones carry no group offset of their own, so the group supplies
-    // it; scale matches the rig so all three read as the same physical cup.
+    // y = the rig's hero height (cupY -0.24 · 0.22 + full hero sink) plus
+    // the cup group's -0.06 offset scaled by the effective hero scale
+    // (1.3·comFS·comFSHero) — the clones carry no group offset of their
+    // own, so the group supplies it; scale matches the rig so all three
+    // read as the same physical cup. The trio only exists while
+    // state.sideCups is up, so it always takes the full hero adjustment.
     sideCupsGroup.position.set(
       0.008 + 0.186 * s,
-      -0.24 * 0.22 + comFY - 0.078 * comFS,
+      -0.24 * 0.22 + comFY + comFYHero - 0.078 * comFS * comFSHero,
       0
     );
-    sideCupsGroup.scale.setScalar(1.3 * comFS);
+    sideCupsGroup.scale.setScalar(1.3 * comFS * comFSHero);
   }
   updateComposition();
 
@@ -458,9 +471,17 @@ function boot() {
   const roastColorB = new THREE.Color();
   function applyState() {
     applyPortalState();
-    rig.position.set(state.cupX * 0.22 * comFX, state.cupY * 0.22 + comFY + parallax.y, state.cupZ);
+    // hero-only portrait adjustment rides state.sideCups (1 in the hero,
+    // scrubbed to 0 as #story arrives) — see the updateComposition comment
+    rig.position.set(
+      state.cupX * 0.22 * comFX,
+      state.cupY * 0.22 + comFY + comFYHero * state.sideCups + parallax.y,
+      state.cupZ
+    );
     rig.rotation.set(state.cupRotX, state.cupRotY + parallax.x, 0);
-    rig.scale.setScalar(state.cupScale * comFS);
+    rig.scale.setScalar(
+      state.cupScale * comFS * (1 + (comFSHero - 1) * state.sideCups)
+    );
     // liquid fills bottom-up: origin sits at the liquid's base. The authored
     // cone matches the cup's interior taper at FULL height — squashing only
     // scale.y would leave its wide top rim poking through the narrower wall

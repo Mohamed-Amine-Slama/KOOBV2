@@ -1,0 +1,18 @@
+# Dev-only — the site itself is index.html + js/ + assets/
+node_modules
+tools
+shots
+docs
+test
+MEDIA_GENERATION.md
+design.md
+package.json
+package-lock.json
+
+# Blender sources (the exported .glb files ship, the sources don't)
+*.blend
+*.blend1
+
+# Texture sources used by tools/, not referenced by the site
+/Cup.png
+/CupCoffee.png
